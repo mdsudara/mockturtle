@@ -8,3 +8,6 @@ examples/
 
 docs/_build
 docs/doxyxml
+
+*.swp
+
