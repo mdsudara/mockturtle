@@ -111,7 +111,7 @@ protected:
   static inline uint32_t word_from_tt( kitty::dynamic_truth_table const& tt )
   {
     auto word = 0;
-    for ( int i = 0; i < tt.num_vars(); ++i )
+	  for ( int i = 0; i < (1 << tt.num_vars()); ++i )
     {
       if ( kitty::get_bit( tt, i ) )
         word |= ( 1 << i );

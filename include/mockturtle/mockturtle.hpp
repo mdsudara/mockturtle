@@ -111,6 +111,7 @@
 #include "mockturtle/networks/xag.hpp"
 #include "mockturtle/networks/storage.hpp"
 #include "mockturtle/networks/mig.hpp"
+#include "mockturtle/networks/tig.hpp"
 #include "mockturtle/properties/migcost.hpp"
 #include "mockturtle/properties/mccost.hpp"
 #include "mockturtle/mockturtle.hpp"

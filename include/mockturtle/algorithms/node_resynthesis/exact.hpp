@@ -46,6 +46,7 @@
 #include "../../networks/aig.hpp"
 #include "../../networks/xmg.hpp"
 #include "../../networks/klut.hpp"
+#include "../../networks/tig.hpp"
 #include "../../utils/include/percy.hpp"
 
 namespace mockturtle
@@ -310,7 +311,6 @@ public:
     {
       spec.initial_steps = *_lower_bound;
     }
-    spec[0] = function;
     bool with_dont_cares{false};
     if ( !kitty::is_const0( dont_cares ) )
     {
@@ -318,10 +318,19 @@ public:
       with_dont_cares = true;
     }
 
+	using signal = signal<Ntk>; 
+
+	assert( function.num_vars() <= 4u );
+	auto const tt = function.num_vars() < 4u ? kitty::extend_to( function, 4u ) : function;
+	const auto config = kitty::exact_npn_canonization( tt );
+	const auto npn = std::get<0>(config);
+	const auto normal = kitty::is_normal( npn );
+    spec[0] = normal ? npn : ~npn;
+
     auto c = [&]() -> std::optional<percy::chain> {
       if ( !with_dont_cares && _ps.cache )
       {
-        const auto it = _ps.cache->find( function );
+        const auto it = _ps.cache->find( spec[0] );
         if ( it != _ps.cache->end() )
         {
           return it->second;
@@ -338,7 +347,7 @@ public:
       }
       if ( !with_dont_cares && _ps.cache )
       {
-        ( *_ps.cache )[function] = c;
+        ( *_ps.cache )[spec[0]] = c;
       }
       return c;
     }();
@@ -347,8 +356,28 @@ public:
     {
       return;
     }
+		
+	std::vector<signal> pis( 4, ntk.get_constant( false ) );
+	std::copy( begin, end, pis.begin() );
 
-    std::vector<signal<Ntk>> signals( begin, end );
+	std::vector<signal> signals( 4, ntk.get_constant( false ) );
+	std::copy (begin, end, signals.begin());
+	auto perm = std::get<2>( config );
+	for ( auto i = 0u; i < 4u; ++i )
+	{
+		signals[i] = pis[perm[i]];
+	}
+
+	const auto& phase = std::get<1>( config );
+	for ( auto i = 0u; i < 4u; ++i )
+	{
+		if ( ( phase >> perm[i] ) & 1 )
+		{
+			signals[i] = !signals[i];
+		}
+	}
+	
+
     for ( auto i = 0; i < c->get_nr_steps(); ++i )
     {
       auto c1 = signals[c->get_step( i )[0]];
@@ -376,8 +405,7 @@ public:
         break;
       }
     }
-
-    fn( c->is_output_inverted( 0 ) ? !signals.back() : signals.back() );
+    fn( (c->is_output_inverted( 0 )  ^ normal ^ ( ( phase >> 4 ) & 1 ) ) ? signals.back() : !signals.back() );
   }
 
   void set_bounds( std::optional<uint32_t> const& lower_bound, std::optional<uint32_t> const& upper_bound )
@@ -600,4 +628,498 @@ protected:
   exact_xmg_resynthesis_params const& ps;
 }; /* exact_xmg_resynthesis */
 
+struct exact_tig_resynthesis_params
+{
+
+	using tt_chain_map_t = std::unordered_map<kitty::dynamic_truth_table, percy::chain, kitty::hash<kitty::dynamic_truth_table>>;
+	using tt_tt_map_t = std::unordered_map<kitty::dynamic_truth_table, kitty::dynamic_truth_table, kitty::hash<kitty::dynamic_truth_table>>;
+
+	using tt_chain_map_ptr = std::shared_ptr<tt_chain_map_t>;
+	using tt_tt_map_ptr = std::shared_ptr<tt_tt_map_t>;
+
+	tt_chain_map_ptr cache;
+
+	int conflict_limit{0};
+
+	percy::SolverType solver_type = percy::SLV_BSAT2;
+
+	percy::EncoderType encoder_type = percy::ENC_SSV;
+
+	percy::SynthMethod synthesis_method = percy::SYNTH_STD;
+};
+
+/*! \brief Resynthesis function based on exact synthesis for MIGs.
+ *
+ * This resynthesis function can be passed to ``node_resynthesis``,
+ * ``cut_rewriting``, and ``refactoring``.  The given truth table will be
+ * resynthesized in terms of an optimum size MIG network.
+ *
+   \verbatim embed:rst
+
+   Example
+
+   .. code-block:: c++
+
+      tig_network<ternary_majority> mig = ...;
+
+      exact_mig_resynthesis<tig_network<ternary_majority>> resyn;
+      mig = cut_rewriting( mig, resyn );
+   \endverbatim
+ *
+ *
+   The underlying engine for this resynthesis function is percy_.
+
+   .. _percy: https://github.com/lsils/percy
+   \endverbatim
+ *
+ */
+template<class Ntk>
+class exact_mig_resynthesis
+{
+public:
+  explicit exact_mig_resynthesis( exact_tig_resynthesis_params const& ps = {} )
+    : ps( ps )
+  {
+  }
+
+  template<typename LeavesIterator, typename TT, typename Fn>
+  void operator()( Ntk& ntk, TT const& function, LeavesIterator begin, LeavesIterator end, Fn&& fn ) const
+  {
+	  static_assert( kitty::is_complete_truth_table<TT>::value, "Truth table must be complete" );
+
+	  using signal = mockturtle::signal<Ntk>;
+
+	  auto const tt = function.num_vars() < 4u ? kitty::extend_to( function, 4u ) : function;
+
+	  percy::chain chain;
+	  bool found_in_cache = false;
+
+	  const auto config = kitty::exact_npn_canonization( tt );
+	  auto npn = std::get<0>(config);
+
+	  bool const normal = kitty::is_normal( npn );
+
+	  if ( ps.cache ) {
+		  if (const auto it = ps.cache->find( normal ? npn : ~npn ); it != ps.cache->end() ) {
+			  chain = it->second;
+			  found_in_cache = true;
+		  } 
+	  } 
+
+	  if (!found_in_cache) {
+		  percy::spec spec;
+		  spec.verbosity = 0;
+		  spec.fanin = 3;
+		  spec[0] = normal ? npn : ~npn;
+
+		  /* specify local normalized gate primitives */
+		  kitty::dynamic_truth_table const0{3};
+		  kitty::dynamic_truth_table a{3};
+		  kitty::dynamic_truth_table b{3};
+		  kitty::dynamic_truth_table c{3};
+		  kitty::create_nth_var( a, 0 );
+		  kitty::create_nth_var( b, 1 );
+		  kitty::create_nth_var( c, 2 );
+
+		  spec.add_primitive( const0 ); // 00
+		  spec.add_primitive( a ); // aa
+		  spec.add_primitive( b ); // cc
+		  spec.add_primitive( c ); // f0
+
+		  /* add self dual gate functions */
+		  spec.add_primitive( kitty::ternary_majority(  a,  b,  c ) ); // e8
+		  spec.add_primitive( kitty::ternary_majority( ~a,  b,  c ) ); // d4
+		  spec.add_primitive( kitty::ternary_majority(  a, ~b,  c ) ); // b2
+		  spec.add_primitive( kitty::ternary_majority(  a,  b, ~c ) ); // 8e
+
+		  spec.add_primitive( kitty::ternary_majority(  const0,   b,  c ) ); // c0
+		  spec.add_primitive( kitty::ternary_majority( ~const0,   b,  c ) ); // fc
+		  spec.add_primitive( kitty::ternary_majority(  const0,  ~b,  c ) ); // 30
+		  spec.add_primitive( kitty::ternary_majority(  const0,   b, ~c ) ); // 0c
+		  spec.add_primitive( kitty::ternary_majority(   a,  const0,  c ) ); // a0
+		  spec.add_primitive( kitty::ternary_majority(  ~a,  const0,  c ) ); // 50
+		  spec.add_primitive( kitty::ternary_majority(   a, ~const0,  c ) ); // fa
+		  spec.add_primitive( kitty::ternary_majority(   a,  const0, ~c ) ); // 0a
+		  spec.add_primitive( kitty::ternary_majority(   a,  b,  const0 ) ); // 88
+		  spec.add_primitive( kitty::ternary_majority(   a,  b, ~const0 ) ); // ee
+		  spec.add_primitive( kitty::ternary_majority(  ~a,  b,  const0 ) ); // 44
+		  spec.add_primitive( kitty::ternary_majority(   a, ~b,  const0 ) ); // 22
+
+
+		  const auto result = percy::synthesize( spec, chain, ps.solver_type, ps.encoder_type, ps.synthesis_method );
+		  assert( result == percy::success );
+
+
+		  auto const sim = chain.simulate();
+		  assert( chain.simulate()[0] == spec[0] );
+	  }
+
+	  std::vector<signal> pis( 4, ntk.get_constant( false ) );
+	  std::copy( begin, end, pis.begin() );
+
+	  std::vector<signal> signals( 4, ntk.get_constant( false ) );
+	  std::copy (begin, end, signals.begin());
+	  auto perm = std::get<2>( config );
+	  for ( auto i = 0u; i < 4u; ++i )
+	  {
+		  signals[i] = pis[perm[i]];
+	  }
+
+	  const auto& phase = std::get<1>( config );
+	  for ( auto i = 0u; i < 4u; ++i )
+	  {
+		  if ( ( phase >> perm[i] ) & 1 )
+		  {
+			  signals[i] = !signals[i];
+		  }
+	  }
+
+	  for ( auto i = 0; i < chain.get_nr_steps(); ++i )
+	  {
+		  auto const c1 = signals[chain.get_step( i )[0]];
+		  auto const c2 = signals[chain.get_step( i )[1]];
+		  auto const c3 = signals[chain.get_step( i )[2]];
+
+		  switch( chain.get_operator( i )._bits[0] )
+		  {
+			  case 0x00:
+				  signals.emplace_back( ntk.get_constant( false ) );
+				  break;
+			  case 0xe8:
+				  signals.emplace_back( ntk.create_maj( c1,  c2,  c3 ) );
+				  break;
+			  case 0xd4:
+				  signals.emplace_back( ntk.create_maj( !c1,  c2,  c3 ) );
+				  break;
+			  case 0xb2:
+				  signals.emplace_back( ntk.create_maj( c1,  !c2,  c3 ) );
+				  break;
+			  case 0x8e:
+				  signals.emplace_back( ntk.create_maj( c1,  c2,  !c3 ) );
+				  break;
+			  case 0xc0:
+				  signals.emplace_back( ntk.create_maj(  ntk.get_constant( false ),  c2,  c3 ) ); // c0
+				  break;
+			  case 0xfc:
+				  signals.emplace_back( ntk.create_maj( !ntk.get_constant( false ),  c2,  c3 ) ); // fc
+				  break;
+			  case 0x30:
+				  signals.emplace_back( ntk.create_maj(  ntk.get_constant( false ), !c2,  c3 ) ); // 30
+				  break;
+			  case 0x0c:
+				  signals.emplace_back( ntk.create_maj(  ntk.get_constant( false ),  c2, !c3 ) ); // 0c
+				  break;
+			  case 0xa0:
+				  signals.emplace_back( ntk.create_maj(   c1,  ntk.get_constant( false ),  c3 ) ); // 0a
+				  break;
+			  case 0x50:
+				  signals.emplace_back( ntk.create_maj(  !c1,  ntk.get_constant( false ),  c3 ) ); // 50
+				  break;
+			  case 0xfa:
+				  signals.emplace_back( ntk.create_maj(   c1, !ntk.get_constant( false ),  c3 ) ); // fa
+				  break;
+			  case 0x0a:
+				  signals.emplace_back( ntk.create_maj(   c1,  ntk.get_constant( false ), !c3 ) ); // 0a
+				  break;
+			  case 0x88:
+				  signals.emplace_back( ntk.create_maj(   c1,  c2,  ntk.get_constant( false ) ) ); // 88
+				  break;
+			  case 0xee:
+				  signals.emplace_back( ntk.create_maj(   c1,  c2, !ntk.get_constant( false ) ) ); // ee
+				  break;
+			  case 0x44:
+				  signals.emplace_back( ntk.create_maj(  !c1,  c2,  ntk.get_constant( false ) ) ); // 44
+				  break;
+			  case 0x22:
+				  signals.emplace_back( ntk.create_maj(   c1, !c2,  ntk.get_constant( false ) ) ); // 22
+				  break;
+			  default:
+				  std::cerr << "[e] unsupported operation " << kitty::to_hex( chain.get_operator( i ) ) << "\n";
+				  assert( false );
+				  break;
+		  }
+	  }
+
+	  assert( chain.get_outputs().size() > 0u );
+	  uint32_t const output_index = ( chain.get_outputs()[0u] >> 1u );
+	  auto const output_signal = output_index == 0u ? ntk.get_constant( false ) : signals[output_index - 1];
+
+	  fn( chain.is_output_inverted( 0 ) ^ normal ^ ( ( phase >> tt.num_vars() ) & 1 ) ? output_signal : !output_signal ); 
+
+  }
+
+protected:
+  exact_tig_resynthesis_params const& ps;
+}; /* exact_mig_resynthesis */
+
+/*! \brief Resynthesis function based on exact synthesis for DIGs.
+ *
+ * This resynthesis function can be passed to ``node_resynthesis``,
+ * ``cut_rewriting``, and ``refactoring``.  The given truth table will be
+ * resynthesized in terms of an optimum size DIG network.
+ *
+   \verbatim embed:rst
+
+   Example
+
+   .. code-block:: c++
+
+      tig_network<ternary_dot> dig = ...;
+
+      exact_dig_resynthesis<xmg_network> resyn;
+      dig = cut_rewriting( dig, resyn );
+   \endverbatim
+ *
+ *
+   The underlying engine for this resynthesis function is percy_.
+
+   .. _percy: https://github.com/lsils/percy
+   \endverbatim
+ *
+ */
+template<class Ntk>
+class exact_dig_resynthesis
+{
+public:
+  explicit exact_dig_resynthesis( exact_tig_resynthesis_params const& ps = {} )
+    : ps( ps )
+  {
+  }
+
+  template<typename LeavesIterator, typename TT, typename Fn>
+  void operator()( Ntk& ntk, TT const& function, LeavesIterator begin, LeavesIterator end, Fn&& fn ) const
+  {
+	  static_assert( kitty::is_complete_truth_table<TT>::value, "Truth table must be complete" );
+
+	  using signal = mockturtle::signal<Ntk>;
+
+	  auto const tt = function.num_vars() < 4u ? kitty::extend_to( function, 4u ) : function;
+
+	  percy::chain chain;
+	  bool found_in_cache = false;
+
+	  const auto config = kitty::exact_npn_canonization( tt );
+	  auto npn = std::get<0>(config);
+
+	  bool const normal = kitty::is_normal( npn );
+
+	  if ( ps.cache ) {
+		  if (const auto it = ps.cache->find( normal ? npn : ~npn ); it != ps.cache->end() ) {
+			  chain = it->second;
+			  found_in_cache = true;
+		  } 
+	  }
+
+	  if (!found_in_cache) {
+		  percy::spec spec;
+		  spec.verbosity = 0;
+		  spec.fanin = 3;
+		  spec[0] = normal ? npn : ~npn;
+
+		  kitty::dynamic_truth_table cnst0{3};
+		  kitty::dynamic_truth_table a{3};
+		  kitty::dynamic_truth_table b{3};
+		  kitty::dynamic_truth_table c{3};
+		  kitty::create_nth_var( a, 0 );
+		  kitty::create_nth_var( b, 1 );
+		  kitty::create_nth_var( c, 2 );
+
+		  std::array<kitty::dynamic_truth_table, 8> choices = {a, ~a, b, ~b, c, ~c, cnst0, ~cnst0};
+
+		  for (auto ind0 = 0; ind0 < 8; ind0++)
+		  {
+			  for (auto ind1 = 0; ind1 < 8; ind1++)
+			  {
+				  for (auto ind2 = 0; ind2 < 8; ind2++)
+				  { 
+					  auto prim = kitty::ternary_operation(choices[ind0], choices[ind1], choices[ind2], 
+							  [](auto a, auto b, auto c) { return a ^ (c | (a & b)); }); 
+					  if (!kitty::is_normal(prim)) {
+						  prim = ~prim;
+					  }
+					  spec.add_primitive( prim );
+				  }
+			  }
+		  }	
+
+
+		  const auto result = percy::synthesize( spec, chain, ps.solver_type, ps.encoder_type, ps.synthesis_method );
+		  assert( result == percy::success );
+
+
+		  auto const sim = chain.simulate();
+		  assert( chain.simulate()[0] == spec[0] );
+	  }
+
+	  std::vector<signal> pis( 4, ntk.get_constant( false ) );
+	  std::copy( begin, end, pis.begin() );
+
+	  std::vector<signal> signals( 4, ntk.get_constant( false ) );
+	  auto perm = std::get<2>( config );
+	  for ( auto i = 0u; i < 4; ++i )
+	  {
+		  signals[i] = pis[perm[i]];
+	  }
+
+	  const auto& phase = std::get<1>( config );
+	  for ( auto i = 0u; i < 4; ++i )
+	  {
+		  if ( ( phase >> perm[i] ) & 1 )
+		  {
+			  signals[i] = !signals[i];
+		  }
+	  }
+
+	  for ( auto i = 0; i < chain.get_nr_steps(); ++i )
+	  {
+		  auto const c1 = signals[chain.get_step( i )[0]];
+		  auto const c2 = signals[chain.get_step( i )[1]];
+		  auto const c3 = signals[chain.get_step( i )[2]];
+
+		  switch( chain.get_operator( i )._bits[0] )
+		  {
+			  case 0x00:
+				  signals.emplace_back( ntk.create_dot( c1, c1, c1 ) );
+				  break;
+			  case 0xaa:
+				  signals.emplace_back( !ntk.create_dot( c1, c1, !c1 ) );
+				  break;
+			  case 0x44:
+				  signals.emplace_back( ntk.create_dot( c1, c1, c2 ) );
+				  break;
+			  case 0xee:
+				  signals.emplace_back( !ntk.create_dot( c1, c1, !c2 ) );
+				  break;
+			  case 0x50:
+				  signals.emplace_back( ntk.create_dot( c1, c1, c3 ) );
+				  break;
+			  case 0xfa:
+				  signals.emplace_back( !ntk.create_dot( c1, c1, !c3 ) );
+				  break;
+			  case 0x66:
+				  signals.emplace_back( ntk.create_dot( c1, !c1, c2 ) );
+				  break;
+			  case 0x5a:
+				  signals.emplace_back( ntk.create_dot( c1, !c1, c3 ) );
+				  break;
+			  case 0x88:
+				  signals.emplace_back( !ntk.create_dot( c1, c2, !c1 ) );
+				  break;
+			  case 0x52:
+				  signals.emplace_back( ntk.create_dot( c1, c2, c3 ) );
+				  break;
+			  case 0xda:
+				  signals.emplace_back( !ntk.create_dot( c1, c2, !c3 ) );
+				  break;
+			  case 0x22:
+				  signals.emplace_back( ntk.create_dot( c1, c2, ntk.get_constant( false ) ) );
+				  break;
+			  case 0x58:
+				  signals.emplace_back( ntk.create_dot( c1, !c2, c3 ) );
+				  break;
+			  case 0x7a:
+				  signals.emplace_back( !ntk.create_dot( c1, !c2, !c3 ) );
+				  break;
+			  case 0xa0:
+				  signals.emplace_back( !ntk.create_dot( c1, c3, !c1 ) );
+				  break;
+			  case 0x46:
+				  signals.emplace_back( ntk.create_dot( c1, c3, c2 ) );
+				  break;
+			  case 0xe6:
+				  signals.emplace_back( !ntk.create_dot( c1, c3, !c2 ) );
+				  break;
+			  case 0x0a:
+				  signals.emplace_back( ntk.create_dot( c1, c3, ntk.get_constant( false ) ) );
+				  break;
+			  case 0x64:
+				  signals.emplace_back( ntk.create_dot( c1, !c3, c2 ) );
+				  break;
+			  case 0x6e:
+				  signals.emplace_back( !ntk.create_dot( c1, !c3, !c2 ) );
+				  break;
+			  case 0x5e:
+				  signals.emplace_back( !ntk.create_dot( !c1, c2, c3 ) );
+				  break;
+			  case 0x1a:
+				  signals.emplace_back( ntk.create_dot( !c1, c2, !c3 ) );
+				  break;
+			  case 0xa4:
+				  signals.emplace_back( ntk.create_dot( !c1, !c2, c3 ) );
+				  break;
+			  case 0x4a:
+				  signals.emplace_back( ntk.create_dot( !c1, !c2, !c3 ) );
+				  break;
+			  case 0x76:
+				  signals.emplace_back( !ntk.create_dot( !c1, c3, c2 ) );
+				  break;
+			  case 0x26:
+				  signals.emplace_back( ntk.create_dot( !c1, c3, !c2 ) );
+				  break;
+			  case 0x98:
+				  signals.emplace_back( ntk.create_dot( !c1, !c3, c2 ) );
+				  break;
+			  case 0x62:
+				  signals.emplace_back( ntk.create_dot( !c1, !c3, !c2 ) );
+				  break;
+			  case 0x34:
+				  signals.emplace_back( ntk.create_dot( c2, c1, c3 ) );
+				  break;
+			  case 0xbc:
+				  signals.emplace_back( !ntk.create_dot( c2, c1, !c3 ) );
+				  break;
+			  case 0xcc:
+				  signals.emplace_back( !ntk.create_dot( c2, c1, !ntk.get_constant( false ) ) );
+				  break;
+			  case 0x38:
+				  signals.emplace_back( ntk.create_dot( c2, !c1, c3 ) );
+				  break;
+			  case 0x7c:
+				  signals.emplace_back( !ntk.create_dot( c2, !c1, !c3 ) );
+				  break;
+			  case 0x30:
+				  signals.emplace_back( ntk.create_dot( c2, c2, c3 ) );
+				  break;
+			  case 0xfc:
+				  signals.emplace_back( !ntk.create_dot( c2, c2, !c3 ) );
+				  break;
+			  case 0x3c:
+				  signals.emplace_back( ntk.create_dot( c2, !c2, c3 ) );
+				  break;
+			  case 0xc0:
+				  signals.emplace_back( !ntk.create_dot( c2, c3, !c2 ) );
+				  break;
+			  case 0x0c:
+				  signals.emplace_back( ntk.create_dot( c2, c3, ntk.get_constant( false ) ) );
+				  break;
+			  case 0x3e:
+				  signals.emplace_back( !ntk.create_dot( !c2, c1, c3 ) );
+				  break;
+			  case 0x1c:
+				  signals.emplace_back( ntk.create_dot( !c2, c1, !c3 ) );
+				  break;
+			  case 0xc2:
+				  signals.emplace_back( ntk.create_dot( !c2, !c1, c3 ) );
+				  break;
+			  case 0x2c:
+				  signals.emplace_back( ntk.create_dot( !c2, !c1, !c3 ) );
+				  break;
+			  case 0xf0:
+				  signals.emplace_back( !ntk.create_dot( c3, c1, !ntk.get_constant( false ) ) );
+				  break;	
+		  }
+
+	  }
+	  assert( chain.get_outputs().size() > 0u );
+	  uint32_t const output_index = ( chain.get_outputs()[0u] >> 1u );
+	  auto const output_signal = output_index == 0u ? ntk.get_constant( false ) : signals[output_index - 1];
+
+	  fn( chain.is_output_inverted( 0 ) ^ normal  ^ ( ( phase >> tt.num_vars() ) & 1 ) ? output_signal : !output_signal ); 
+  }
+
+protected:
+  exact_tig_resynthesis_params const& ps;
+}; /* exact_dig_resynthesis */
+
 } /* namespace mockturtle */
+
