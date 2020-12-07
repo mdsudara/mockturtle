@@ -481,7 +481,7 @@ public:
     storage::element_type::node_type _hash_obj;
     _hash_obj.children[0] = child0;
     _hash_obj.children[1] = child1;
-    if ( const auto it = _storage->hash.find( _hash_obj ); it != _storage->hash.end() )
+    if ( const auto it = _storage->hash.find( _hash_obj ); it != _storage->hash.end() && it->second != old_node )
     {
       return std::make_pair( n, signal( it->second, 0 ) );
     }
@@ -584,8 +584,16 @@ public:
       /* check outputs */
       replace_in_outputs( _old, _new );
 
-      // reset fan-in of old node
-      take_out_node( _old );
+      /* recursively reset old node */
+      if ( _old != _new.index )
+      {
+        take_out_node( _old );
+      }
+      else
+      {
+        /* if _old is substituted by its complement, then only decrement _old */
+        decr_fanout_size( _old );
+      }
     }
   }
 #pragma endregion
