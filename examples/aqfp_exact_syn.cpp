@@ -11,8 +11,10 @@
 #include <mockturtle/algorithms/exact_syn/dag.hpp>
 #include <mockturtle/algorithms/exact_syn/sat.hpp>
 
+#include "./aqfp_cost_all_config.hpp"
 #include "./aqfp_cost_func.hpp"
 #include "./npn4.hpp"
+#include "./simulate_dag.hpp"
 
 template<typename T>
 class task_queue
@@ -159,13 +161,13 @@ void test_aqfp_costs()
       true,
       -1.0,
       3u,
-      {{1, 4, 5}, {2, 4, 5}, {3, 5, 6}, {5, 7, 8}, {}, {}, {}, {}, {}},
-      {3, 3, 3, 3, 0, 0, 0, 0, 0},
-      {{3u, 4u}},
+      { { 1, 4, 5 }, { 2, 4, 5 }, { 3, 5, 6 }, { 5, 7, 8 }, {}, {}, {}, {}, {} },
+      { 3, 3, 3, 3, 0, 0, 0, 0, 0 },
+      { { 3u, 4u } },
       {},
       {},
-      {4, 5, 6, 7, 8},
-      5u};
+      { 4, 5, 6, 7, 8 },
+      5u };
 
   fmt::print( "cost of net1 is {}\n", aqfp_cost( net1 ) );
 
@@ -175,13 +177,13 @@ void test_aqfp_costs()
       true,
       -1.0,
       3u,
-      {{1, 2, 6}, {4, 5, 6}, {3, 6, 7}, {6, 8, 9}, {6, 7, 10}, {6, 8, 9}, {}, {}, {}, {}, {}},
-      {3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0},
-      {{3u, 6u}},
+      { { 1, 2, 6 }, { 4, 5, 6 }, { 3, 6, 7 }, { 6, 8, 9 }, { 6, 7, 10 }, { 6, 8, 9 }, {}, {}, {}, {}, {} },
+      { 3, 3, 3, 3, 3, 3, 0, 0, 0, 0, 0 },
+      { { 3u, 6u } },
       {},
       {},
-      {6, 7, 8, 9, 10},
-      0u};
+      { 6, 7, 8, 9, 10 },
+      0u };
 
   fmt::print( "cost of net2 is {}\n", aqfp_cost( net2 ) );
 }
@@ -191,8 +193,8 @@ void test_aqfp_costs()
  */
 void test_dag_generation()
 {
-  std::vector<size_t> allowed_num_fanins = {3u};                      // will use only fanin 3 gates
-  std::map<size_t, size_t> max_gates_of_fanin = {{3u, 7u}, {5u, 0u}}; // allow at most 7 3-input gates and 0 5-input gates
+  std::vector<size_t> allowed_num_fanins = { 3u };                          // will use only fanin 3 gates
+  std::map<size_t, size_t> max_gates_of_fanin = { { 3u, 7u }, { 5u, 0u } }; // allow at most 7 3-input gates and 0 5-input gates
 
   auto params = mockturtle::dag_params();
 
@@ -224,10 +226,53 @@ void test_dag_generation()
   }
 }
 
+void save_all()
+{
+  std::vector<size_t> allowed_num_fanins = { 3u };              // will use only fanin 3 gates
+  std::map<size_t, size_t> max_gates_of_fanin = { { 3u, 7u } }; // allow at most 7 3-input gates and 0 5-input gates
+
+  auto params = mockturtle::dag_params();
+
+  params.max_gates = 7u;         // allow at most 6 gates in total
+  params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
+  params.max_width = 1000u;      // maximum number of gates at any level
+  params.max_num_in = 5u;        // maximum number of inputs slots (need extra one for the constant)
+  params.max_level = 7u;         // maximum number of gate levels in a DAG
+
+  params.allowed_num_fanins = allowed_num_fanins;
+  params.max_gates_of_fanin = max_gates_of_fanin;
+
+  auto gen = mockturtle::gen_dag( params, simple_cost );
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  auto count = 0u;
+  while ( count < 1000000000u )
+  {
+    auto result_opt = gen.next_potentially_feasible( []( auto& net ) {(void) net; return true; } );
+
+    if ( result_opt == std::nullopt )
+    {
+      /* No more DAGs */
+      break;
+    }
+    auto result = result_opt.value();
+
+    fmt::print( "{}\n", result.get_encoding() );
+
+    count++;
+    if ( count % 1000 == 0 )
+    {
+      auto t1 = std::chrono::high_resolution_clock::now();
+      auto d1 = std::chrono::duration_cast<std::chrono::microseconds>( t1 - t0 );
+      std::cerr << fmt::format( "dags generated {:8d} time so far milliseconds {:8d}\n", count, d1.count() / 1000ul );
+    }
+  }
+}
+
 void synthesize_all()
 {
-  std::vector<size_t> allowed_num_fanins = {3u};                      // will use only fanin 3 gates
-  std::map<size_t, size_t> max_gates_of_fanin = {{3u, 7u}, {5u, 0u}}; // allow at most 7 3-input gates and 0 5-input gates
+  std::vector<size_t> allowed_num_fanins = { 3u };                          // will use only fanin 3 gates
+  std::map<size_t, size_t> max_gates_of_fanin = { { 3u, 7u }, { 5u, 0u } }; // allow at most 7 3-input gates and 0 5-input gates
 
   auto params = mockturtle::dag_params();
 
@@ -255,12 +300,12 @@ void synthesize_all()
           assert( result.is_partial_dag );
           for ( auto&& t : result.last_layer_leaves )
           {
-            result.add_leaf_node( {t} );
+            result.add_leaf_node( { t } );
           }
 
           for ( auto&& t : result.other_leaves )
           {
-            result.add_leaf_node( {t} );
+            result.add_leaf_node( { t } );
           }
 
           result.last_layer_leaves.clear();
@@ -301,7 +346,7 @@ void synthesize_all()
                         // fmt::print( "pdag cannot synthesize {:04x}\n", tt );
                       }
                       num_threads--;
-                      return {res, tt};
+                      return { res, tt };
                     },
                     std::ref( result ), num_in, tt ) );
 
@@ -351,7 +396,7 @@ void synthesize_all()
       {
         if ( syn_tasks.size() < MAX_SYN_TASK_QUEUE_SIZE )
         {
-          syn_tasks.push( {result, num_in, tt} );
+          syn_tasks.push( { result, num_in, tt } );
           break;
         }
         else
@@ -401,10 +446,33 @@ std::vector<std::string> read_lines( std::istream& is )
   return result;
 }
 
+void process_all_dags()
+{
+  std::string temp;
+  size_t count = 0u;
+  while ( getline( std::cin, temp ) )
+  {
+    if ( temp.length() > 0 )
+    {
+      fmt::print( "processing dag {} [{}]\n", ++count, temp );
+      mockturtle::aqfp_logical_network_t net;
+      net.decode_string( temp );
+      // fmt::print("{}\n", mockturtle::as_string(net));
+      aqfp_cost_all( net );
+    }
+  }
+}
+
 int main( int argc, char** argv )
 {
   (void)argc;
   (void)argv;
+
+  // simulate_all_dags();
+  // process_all_dags();
+  save_all();
+
+  return 0;
 
   for ( auto i = 0u; i < NUM_NPN_4; i++ )
   {

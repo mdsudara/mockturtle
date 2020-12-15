@@ -7,6 +7,7 @@
 #include <mutex>
 #include <queue>
 #include <set>
+#include <sstream>
 #include <vector>
 
 namespace mockturtle
@@ -24,7 +25,7 @@ std::string as_string( const partition& p )
   std::vector<std::string> parts;
   for ( auto&& q : p )
   {
-    parts.push_back( fmt::format( "[{}]", fmt::join( q, ", " ) ) );
+	parts.push_back( fmt::format( "[{}]", fmt::join( q, ", " ) ) );
   }
   return fmt::format( "[ {} ]", fmt::join( parts, " " ) );
 }
@@ -40,7 +41,7 @@ auto get_frequencies( const std::vector<int>& elems )
   std::map<int, size_t> elem_counts;
   for ( const auto& e : elems )
   {
-    elem_counts[e]++;
+	elem_counts[e]++;
   }
   return elem_counts;
 }
@@ -49,69 +50,69 @@ using partition_cache_key_t = std::tuple<const std::vector<int>, const std::map<
 thread_local std::map<partition_cache_key_t, partition_set> partition_cache;
 /*
  * Computes and returns a vector of partitions for a given list of elements
- * such that no part contains any element 'e' more than 'max_counts[e]' times. 
+ * such that no part contains any element 'e' more than 'max_counts[e]' times.
  * Ex: if 'elems' = [ 1, 2, 2, 3 ], this will generate the partitions,
  * [ [1] [2] [2] [3] ], [ [1] [2] [2, 3] ], [ [1, 2] [2] [3] ],
  * [ [1, 2], [2, 3] ], [ [1, 2, 3], [2] ], and [ [1, 3] [2] [2] ], if
  * 'max_counts' is all-ones.
  */
 partition_set get_all_partitions(
-    std::vector<int> elems,
-    const std::map<int, size_t>& max_counts = {},
-    size_t max_parts = 0,
-    size_t max_part_size = 0 )
+	std::vector<int> elems,
+	const std::map<int, size_t>& max_counts = {},
+	size_t max_parts = 0,
+	size_t max_part_size = 0 )
 {
   if ( elems.size() == 0 )
   {
-    return { {} }; // return the empty parition.
+	return { {} }; // return the empty parition.
   }
 
   partition_cache_key_t key = { elems, max_counts, max_parts, max_part_size };
   if ( !partition_cache.count( key ) )
   {
-    partition_set result;
+	partition_set result;
 
-    auto last = elems.back();
-    elems.pop_back();
+	auto last = elems.back();
+	elems.pop_back();
 
-    auto temp = get_all_partitions( elems, max_counts, max_parts, max_part_size );
+	auto temp = get_all_partitions( elems, max_counts, max_parts, max_part_size );
 
-    for ( auto&& t : temp )
-    {
-      partition cpy;
+	for ( auto&& t : temp )
+	{
+	  partition cpy;
 
-      // take 'last' in its own partition
-      cpy = t;
+	  // take 'last' in its own partition
+	  cpy = t;
 
-      if ( max_parts == 0 || max_parts > cpy.size() )
-      {
-        cpy.insert( { last } );
-        result.insert( cpy );
-      }
+	  if ( max_parts == 0 || max_parts > cpy.size() )
+	  {
+		cpy.insert( { last } );
+		result.insert( cpy );
+	  }
 
-      // add 'last' to one of the existing partitions
-      for ( auto it = t.begin(); it != t.end(); )
-      {
-        if ( !max_counts.count( last ) || it->count( last ) < max_counts.at( last ) )
-        {
+	  // add 'last' to one of the existing partitions
+	  for ( auto it = t.begin(); it != t.end(); )
+	  {
+		if ( !max_counts.count( last ) || it->count( last ) < max_counts.at( last ) )
+		{
 
-          if ( max_part_size == 0 || max_part_size > it->size() )
-          {
-            cpy = t;
-            auto elem_it = cpy.find( *it );
-            auto cpy_elem = *elem_it;
-            cpy_elem.insert( last );
-            cpy.erase( elem_it );
-            cpy.insert( cpy_elem );
-            result.insert( cpy );
-          }
-        }
+		  if ( max_part_size == 0 || max_part_size > it->size() )
+		  {
+			cpy = t;
+			auto elem_it = cpy.find( *it );
+			auto cpy_elem = *elem_it;
+			cpy_elem.insert( last );
+			cpy.erase( elem_it );
+			cpy.insert( cpy_elem );
+			result.insert( cpy );
+		  }
+		}
 
-        std::advance( it, t.count( *it ) );
-      }
-    }
+		std::advance( it, t.count( *it ) );
+	  }
+	}
 
-    partition_cache[key] = result;
+	partition_cache[key] = result;
   }
 
   return partition_cache[key];
@@ -132,44 +133,44 @@ partition_set extend_partitions( std::vector<int> elems, partition base, const s
 {
   if ( elems.size() == 0 )
   {
-    return { base };
+	return { base };
   }
 
   partition_ext_cache_key_t key = { elems, base, max_counts, max_part_size };
   if ( !partition_ext_cache.count( key ) )
   {
-    partition_set result;
+	partition_set result;
 
-    auto last = elems.back();
-    elems.pop_back();
+	auto last = elems.back();
+	elems.pop_back();
 
-    auto temp = extend_partitions( elems, base, max_counts, max_part_size );
-    for ( auto&& t : temp )
-    {
-      partition cpy;
+	auto temp = extend_partitions( elems, base, max_counts, max_part_size );
+	for ( auto&& t : temp )
+	{
+	  partition cpy;
 
-      for ( auto it = t.begin(); it != t.end(); )
-      {
-        if ( it->count( last ) < max_counts.at( last ) )
-        {
+	  for ( auto it = t.begin(); it != t.end(); )
+	  {
+		if ( it->count( last ) < max_counts.at( last ) )
+		{
 
-          if ( max_part_size == 0 || max_part_size > it->size() )
-          {
-            cpy = t;
-            auto elem_it = cpy.find( *it );
-            auto cpy_elem = *elem_it;
-            cpy_elem.insert( last );
-            cpy.erase( elem_it );
-            cpy.insert( cpy_elem );
-            result.insert( cpy );
-          }
-        }
+		  if ( max_part_size == 0 || max_part_size > it->size() )
+		  {
+			cpy = t;
+			auto elem_it = cpy.find( *it );
+			auto cpy_elem = *elem_it;
+			cpy_elem.insert( last );
+			cpy.erase( elem_it );
+			cpy.insert( cpy_elem );
+			result.insert( cpy );
+		  }
+		}
 
-        std::advance( it, t.count( *it ) );
-      }
-    }
+		std::advance( it, t.count( *it ) );
+	  }
+	}
 
-    partition_ext_cache[key];
+	partition_ext_cache[key];
   }
 
   return partition_ext_cache[key];
@@ -185,40 +186,40 @@ std::set<std::vector<int>> get_sub_lists_recur( std::map<int, size_t> elem_count
 {
   if ( elem_counts.size() == 0u )
   {
-    return { {} };
+	return { {} };
   }
 
   sub_list_cache_key_t key = elem_counts;
   if ( !sub_list_cache.count( key ) )
   {
-    auto last = std::prev( elem_counts.end() );
-    auto last_elem = last->first;
-    auto last_count = last->second;
-    elem_counts.erase( last );
+	auto last = std::prev( elem_counts.end() );
+	auto last_elem = last->first;
+	auto last_count = last->second;
+	elem_counts.erase( last );
 
-    std::set<std::vector<int>> result;
+	std::set<std::vector<int>> result;
 
-    std::vector<int> t;
-    for ( auto i = last_count; i > 0; --i )
-    {
-      t.push_back( last_elem );
-      result.insert( t ); // insert a copy of t, and note that t is already sorted.
-    }
+	std::vector<int> t;
+	for ( auto i = last_count; i > 0; --i )
+	{
+	  t.push_back( last_elem );
+	  result.insert( t ); // insert a copy of t, and note that t is already sorted.
+	}
 
-    auto temp = get_sub_lists_recur( elem_counts );
+	auto temp = get_sub_lists_recur( elem_counts );
 
-    for ( std::vector<int> t : temp )
-    {
-      result.insert( t );
-      for ( auto i = last_count; i > 0; --i )
-      {
-        t.push_back( last_elem );
-        std::sort( t.begin(), t.end() );
-        result.insert( t );
-      }
-    }
+	for ( std::vector<int> t : temp )
+	{
+	  result.insert( t );
+	  for ( auto i = last_count; i > 0; --i )
+	  {
+		t.push_back( last_elem );
+		std::sort( t.begin(), t.end() );
+		result.insert( t );
+	  }
+	}
 
-    sub_list_cache[key] = result;
+	sub_list_cache[key] = result;
   }
 
   return sub_list_cache[key];
@@ -253,7 +254,7 @@ struct dag_params
   }
 
   dag_params( size_t max_gates, size_t max_num_fanout, size_t max_width, size_t max_num_in )
-      : max_gates( max_gates ), max_num_fanout( max_num_fanout ), max_width( max_width ), max_num_in( max_num_in )
+	  : max_gates( max_gates ), max_num_fanout( max_num_fanout ), max_width( max_width ), max_num_in( max_num_in )
   {
   }
 };
@@ -282,62 +283,115 @@ struct aqfp_logical_network_t
 
   size_t zero_input = 0;
 
+  void decode_string(std::string str) {
+	  pdag_id = 0;
+	  is_dag = 1;
+	  is_partial_dag = 0;
+
+	  computed_cost = -1.0;
+	  size_t level = 0u;
+
+	  std::istringstream iss (str);
+	  auto ng = 0u;
+	  auto ni = 0u;
+	  auto zi = 0u;
+
+	  iss >> ng >> ni >> zi;
+	  zero_input = zi;
+
+	  for (auto i = 0u; i < ng; i++) {
+		auto nf = 0u;
+		iss >> nf;
+
+		node_num_fanin.push_back(nf);
+		nodes.push_back({});
+
+		num_gates_of_fanin[nf]++;
+
+		for (auto j = 0u; j < nf; j++) {
+		  auto t = 0u;
+		  iss >> t;
+		  nodes[i].push_back(t);
+		}
+	  }
+
+	  for (auto i = 0u; i < ni; i++) {
+		nodes.push_back({});
+		node_num_fanin.push_back(0);
+		input_slots.push_back(nodes.size() - 1);
+	  }
+  }
+
+  std::string get_encoding() const
+  {
+	assert( is_dag );
+
+	std::stringstream ss;
+	ss << num_gates() << " " << input_slots.size() << " " << zero_input;
+	for ( auto i = 0u; i < num_gates(); i++ )
+	{
+	  ss << fmt::format( " {} {}", node_num_fanin[i], fmt::join( nodes[i], " " ) );
+	}
+
+	return ss.str();
+  }
+
   /*
    * Return the number of majority gates.
    */
   size_t num_gates() const
   {
-    return nodes.size() - input_slots.size();
+	return nodes.size() - input_slots.size();
   }
 
   std::map<node_t, size_t> max_equal_fanins() const
   {
-    std::map<node_t, size_t> res;
-    for ( auto i = 0u; i < num_gates(); i++ )
-    {
-      res[i] = node_num_fanin[i] / 2;
-    }
-    return res;
+	std::map<node_t, size_t> res;
+	for ( auto i = 0u; i < num_gates(); i++ )
+	{
+	  res[i] = node_num_fanin[i] / 2;
+	}
+	return res;
   }
 
   void add_fanin( node_t node_id, node_t fanin )
   {
-    nodes[node_id].push_back( fanin );
+	nodes[node_id].push_back( fanin );
   }
 
   // add a new node with given number of fanins
   size_t add_internal_node( size_t num_fanin = 3u, const part& fanouts = {}, bool is_in_last_layer = true )
   {
-    size_t node_id = nodes.size();
-    nodes.push_back( {} );
+	size_t node_id = nodes.size();
+	nodes.push_back( {} );
 
-    assert( node_id == node_num_fanin.size() );
+	assert( node_id == node_num_fanin.size() );
 
-    node_num_fanin.push_back( num_fanin );
+	node_num_fanin.push_back( num_fanin );
 
-    for ( auto&& fo : fanouts )
-    {
-      add_fanin( fo, node_id );
-    }
+	for ( auto&& fo : fanouts )
+	{
+	  add_fanin( fo, node_id );
+	}
 
-    if ( is_in_last_layer )
-    {
-      for ( auto slot = 0u; slot < num_fanin; slot++ )
-      {
-        last_layer_leaves.push_back( node_id );
-      }
-    }
+	if ( is_in_last_layer )
+	{
+	  for ( auto slot = 0u; slot < num_fanin; slot++ )
+	  {
+		last_layer_leaves.push_back( node_id );
+	  }
+	}
 
-    num_gates_of_fanin[num_fanin]++;
+	num_gates_of_fanin[num_fanin]++;
 
-    return node_id;
+	return node_id;
   }
 
   size_t add_leaf_node( const part& fanouts = {} )
   {
-    auto input_slot = add_internal_node( 0u, fanouts, false );
-    input_slots.push_back( input_slot );
-    return input_slot;
+	auto input_slot = add_internal_node( 0u, fanouts, false );
+	input_slots.push_back( input_slot );
+	return input_slot;
   }
 
   /*
@@ -345,24 +399,24 @@ struct aqfp_logical_network_t
    */
   aqfp_logical_network_t copy_without_leaves() const
   {
-    aqfp_logical_network_t res;
+	aqfp_logical_network_t res;
 
-    res.is_partial_dag = is_partial_dag;
-    res.is_dag = is_dag;
-    res.level = level;
+	res.is_partial_dag = is_partial_dag;
+	res.is_dag = is_dag;
+	res.level = level;
 
-    res.nodes = nodes;
-    res.node_num_fanin = node_num_fanin;
-    res.num_gates_of_fanin = num_gates_of_fanin;
+	res.nodes = nodes;
+	res.node_num_fanin = node_num_fanin;
+	res.num_gates_of_fanin = num_gates_of_fanin;
 
-    return res;
+	return res;
   }
 
   aqfp_logical_network_t copy_with_last_layer_leaves()
   {
-    auto res = copy_without_leaves();
-    res.last_layer_leaves = last_layer_leaves;
-    return res;
+	auto res = copy_without_leaves();
+	res.last_layer_leaves = last_layer_leaves;
+	return res;
   }
 
   /*
@@ -370,15 +424,15 @@ struct aqfp_logical_network_t
    */
   static aqfp_logical_network_t get_root( size_t num_fanin )
   {
-    aqfp_logical_network_t net;
+	aqfp_logical_network_t net;
 
-    net.is_partial_dag = true;
-    net.is_dag = false;
-    net.level = 1u;
+	net.is_partial_dag = true;
+	net.is_dag = false;
+	net.level = 1u;
 
-    net.add_internal_node( num_fanin, {}, true );
+	net.add_internal_node( num_fanin, {}, true );
 
-    return net;
+	return net;
   }
 };
 
@@ -389,21 +443,21 @@ std::string as_string( const aqfp_logical_network& net )
   std::vector<std::string> nodes;
   for ( auto i = 0u; i < net.nodes.size(); i++ )
   {
-    std::vector<int> temp = net.nodes[i];
-    while ( temp.size() < net.node_num_fanin[i] )
-    {
-      temp.push_back( i );
-    }
-    nodes.push_back( fmt::format( "{} = ({})", i, fmt::join( temp, " " ) ) );
+	std::vector<int> temp = net.nodes[i];
+	while ( temp.size() < net.node_num_fanin[i] )
+	{
+	  temp.push_back( i );
+	}
+	nodes.push_back( fmt::format( "{} = ({})", i, fmt::join( temp, " " ) ) );
   }
   return fmt::format( "{} N = {} ID {} DAG [ {} ] I = [{}] LL = [{}] OL = [{}] Z = {}", ( net.is_partial_dag ? "pdag" : ( net.is_dag ? "dag" : "invalid" ) ),
-                      net.num_gates(),
-                      net.pdag_id,
-                      fmt::join( nodes, " " ),
-                      fmt::join( net.input_slots, " " ),
-                      fmt::join( net.last_layer_leaves, " " ),
-                      fmt::join( net.other_leaves, " " ),
-                      ( net.zero_input > 0 ) ? fmt::format( "{}", net.zero_input ) : "NA" );
+					  net.num_gates(),
+					  net.pdag_id,
+					  fmt::join( nodes, " " ),
+					  fmt::join( net.input_slots, " " ),
+					  fmt::join( net.last_layer_leaves, " " ),
+					  fmt::join( net.other_leaves, " " ),
+					  ( net.zero_input > 0 ) ? fmt::format( "{}", net.zero_input ) : "NA" );
 }
 
 /*
@@ -420,7 +474,7 @@ aqfp_logical_network get_next_dag( const aqfp_logical_network& orig, const parti
 
   for ( auto&& q : p )
   {
-    net.add_leaf_node( q );
+	net.add_leaf_node( q );
   }
 
   return net;
@@ -432,7 +486,7 @@ aqfp_logical_network get_next_dag( const aqfp_logical_network& orig, const parti
  * TODO: generate all pdags with different gate types
  */
 aqfp_logical_network get_next_partial_dag( const aqfp_logical_network& orig, const partition& p,
-                                           const std::vector<int>& other_leaves )
+										   const std::vector<int>& other_leaves )
 {
   assert( orig.is_partial_dag );
 
@@ -443,7 +497,7 @@ aqfp_logical_network get_next_partial_dag( const aqfp_logical_network& orig, con
 
   for ( auto&& q : p )
   {
-    net.add_internal_node( 3u, q, true );
+	net.add_internal_node( 3u, q, true );
   }
 
   net.other_leaves = other_leaves; // set other leaves
@@ -455,7 +509,7 @@ std::vector<aqfp_logical_network> add_node_recur( const aqfp_logical_network& or
 {
   if ( part_ind == p.size() )
   {
-    return { orig.copy_without_leaves() };
+	return { orig.copy_without_leaves() };
   }
 
   std::vector<aqfp_logical_network> res;
@@ -463,22 +517,22 @@ std::vector<aqfp_logical_network> add_node_recur( const aqfp_logical_network& or
   // what fanin gate to use for part at part_ind?
   for ( auto&& fin : params.allowed_num_fanins )
   {
-    if ( max_allowed_of_fanin[fin] == 0 )
-    {
-      continue;
-    }
-    max_allowed_of_fanin[fin]--;
+	if ( max_allowed_of_fanin[fin] == 0 )
+	{
+	  continue;
+	}
+	max_allowed_of_fanin[fin]--;
 
-    auto temp = add_node_recur( orig, p, part_ind + 1, max_allowed_of_fanin, params );
+	auto temp = add_node_recur( orig, p, part_ind + 1, max_allowed_of_fanin, params );
 
-    for ( auto&& t : temp )
-    {
-      auto net = t.copy_with_last_layer_leaves();
-      net.add_internal_node( fin, p[part_ind], true );
-      res.push_back( net );
-    }
+	for ( auto&& t : temp )
+	{
+	  auto net = t.copy_with_last_layer_leaves();
+	  net.add_internal_node( fin, p[part_ind], true );
+	  res.push_back( net );
+	}
 
-    max_allowed_of_fanin[fin]++;
+	max_allowed_of_fanin[fin]++;
   }
 
   return res;
@@ -489,14 +543,14 @@ std::vector<aqfp_logical_network> add_node_recur( const aqfp_logical_network& or
  * indicated by 'p'.
  */
 std::vector<aqfp_logical_network> get_next_partial_dags( const aqfp_logical_network& orig, const partition& p,
-                                                         const std::vector<int>& other_leaves, const dag_params& params )
+														 const std::vector<int>& other_leaves, const dag_params& params )
 {
 
   auto max_allowed_of_fanin = params.max_gates_of_fanin;
   for ( auto it = orig.num_gates_of_fanin.begin(); it != orig.num_gates_of_fanin.end(); it++ )
   {
-    assert( max_allowed_of_fanin[it->first] >= it->second );
-    max_allowed_of_fanin[it->first] -= it->second;
+	assert( max_allowed_of_fanin[it->first] >= it->second );
+	max_allowed_of_fanin[it->first] -= it->second;
   }
 
   std::vector<part> q( p.begin(), p.end() );
@@ -505,7 +559,7 @@ std::vector<aqfp_logical_network> get_next_partial_dags( const aqfp_logical_netw
 
   for ( auto&& net : res )
   {
-    net.other_leaves = other_leaves;
+	net.other_leaves = other_leaves;
   }
 
   return res;
@@ -525,15 +579,15 @@ std::vector<aqfp_logical_network> get_dags_from_partial_dag( const aqfp_logical_
   std::vector<aqfp_logical_network> result;
   for ( auto p : partitions )
   {
-    auto new_net = get_next_dag( net, p );
-    result.push_back( new_net );
+	auto new_net = get_next_dag( net, p );
+	result.push_back( new_net );
 
-    for ( auto i = 0u; i < new_net.input_slots.size(); i++ )
-    {
-      auto temp_net = new_net;
-      temp_net.zero_input = new_net.input_slots[i];
-      result.push_back( temp_net );
-    }
+	for ( auto i = 0u; i < new_net.input_slots.size(); i++ )
+	{
+	  auto temp_net = new_net;
+	  temp_net.zero_input = new_net.input_slots[i];
+	  result.push_back( temp_net );
+	}
   }
 
   return result;
@@ -561,69 +615,69 @@ std::vector<aqfp_logical_network> get_layer_extension( const aqfp_logical_networ
 
   for ( auto&& last : last_options )
   {
-    if ( last.empty() )
-      continue;
+	if ( last.empty() )
+	  continue;
 
-    // fmt::print( "last = [{}]\n", fmt::join( last, ", " ) );
+	// fmt::print( "last = [{}]\n", fmt::join( last, ", " ) );
 
-    auto last_counts_cpy = last_counts;
-    for ( auto&& e : last )
-    {
-      assert( last_counts_cpy[e] > 0 );
-      last_counts_cpy[e]--;
-    }
+	auto last_counts_cpy = last_counts;
+	for ( auto&& e : last )
+	{
+	  assert( last_counts_cpy[e] > 0 );
+	  last_counts_cpy[e]--;
+	}
 
-    for ( auto&& other : other_options )
-    {
-      // fmt::print( "\tother = [{}]\n", fmt::join( other, ", " ) );
+	for ( auto&& other : other_options )
+	{
+	  // fmt::print( "\tother = [{}]\n", fmt::join( other, ", " ) );
 
-      auto other_counts_cpy = other_counts;
-      for ( auto&& e : other )
-      {
-        assert( other_counts_cpy[e] > 0 );
-        other_counts_cpy[e]--;
-      }
+	  auto other_counts_cpy = other_counts;
+	  for ( auto&& e : other )
+	  {
+		assert( other_counts_cpy[e] > 0 );
+		other_counts_cpy[e]--;
+	  }
 
-      std::vector<int> other_leaves_new;
-      for ( auto it = last_counts_cpy.begin(); it != last_counts_cpy.end(); it++ )
-      {
-        for ( auto i = 0u; i < it->second; i++ )
-        {
-          other_leaves_new.push_back( it->first );
-        }
-      }
-      for ( auto it = other_counts_cpy.begin(); it != other_counts_cpy.end(); it++ )
-      {
-        for ( auto i = 0u; i < it->second; i++ )
-        {
-          other_leaves_new.push_back( it->first );
-        }
-      }
+	  std::vector<int> other_leaves_new;
+	  for ( auto it = last_counts_cpy.begin(); it != last_counts_cpy.end(); it++ )
+	  {
+		for ( auto i = 0u; i < it->second; i++ )
+		{
+		  other_leaves_new.push_back( it->first );
+		}
+	  }
+	  for ( auto it = other_counts_cpy.begin(); it != other_counts_cpy.end(); it++ )
+	  {
+		for ( auto i = 0u; i < it->second; i++ )
+		{
+		  other_leaves_new.push_back( it->first );
+		}
+	  }
 
-      if ( params.max_gates == 0 || params.max_gates > net.num_gates() )
-      {
-        auto last_layers_partitions = detail::get_all_partitions( last,
-                                                                  max_counts,
-                                                                  params.max_gates > 0 ? params.max_gates - net.num_gates() : 0u /* max parts */,
-                                                                  params.max_num_fanout /* unlimited part size (fanouts) */ );
-        for ( auto p : last_layers_partitions )
-        {
-          auto extensions = detail::extend_partitions( other,
-                                                       p,
-                                                       max_counts,
-                                                       params.max_num_fanout /* unlimited part size (fanouts) */ );
-          for ( auto q : extensions )
-          {
-            auto temp = get_next_partial_dags( net, q, other_leaves_new, params );
-            for ( auto&& r : temp )
-            {
-              r.level++;
-              result.push_back( r );
-            }
-          }
-        }
-      }
-    }
+	  if ( params.max_gates == 0 || params.max_gates > net.num_gates() )
+	  {
+		auto last_layers_partitions = detail::get_all_partitions( last,
+																  max_counts,
+																  params.max_gates > 0 ? params.max_gates - net.num_gates() : 0u /* max parts */,
+																  params.max_num_fanout /* unlimited part size (fanouts) */ );
+		for ( auto p : last_layers_partitions )
+		{
+		  auto extensions = detail::extend_partitions( other,
+													   p,
+													   max_counts,
+													   params.max_num_fanout /* unlimited part size (fanouts) */ );
+		  for ( auto q : extensions )
+		  {
+			auto temp = get_next_partial_dags( net, q, other_leaves_new, params );
+			for ( auto&& r : temp )
+			{
+			  r.level++;
+			  result.push_back( r );
+			}
+		  }
+		}
+	  }
+	}
   }
 
   return result;
@@ -634,194 +688,197 @@ class gen_dag
 {
 public:
   gen_dag( const dag_params& params, Fn&& fn ) : params( params ), cost_fn( fn ),
-                                                 pq( [&fn]( auto&& x, auto&& y ) -> bool { return fn( x ) > fn( y ) || ( fn( x ) == fn( y ) && y.is_dag && x.is_partial_dag ); } )
+												 pq( [&fn]( auto&& x, auto&& y ) -> bool { return fn( x ) > fn( y ) || ( fn( x ) == fn( y ) && y.is_dag && x.is_partial_dag ); } )
   {
-    for ( auto&& fin : params.allowed_num_fanins )
-    {
-      if ( params.max_gates_of_fanin.at( fin ) > 0 )
-      {
-        auto root = aqfp_logical_network::get_root( fin );
-        root.pdag_id = ( ++next_pdag_id );
-        pq.push( root );
-      }
-    }
+	for ( auto&& fin : params.allowed_num_fanins )
+	{
+	  if ( params.max_gates_of_fanin.at( fin ) > 0 )
+	  {
+		auto root = aqfp_logical_network::get_root( fin );
+		root.pdag_id = ( ++next_pdag_id );
+		pq.push( root );
+	  }
+	}
   }
 
   std::optional<aqfp_logical_network> next()
   {
-    while ( true )
-    {
-      if ( pq.empty() )
-      {
-        return std::nullopt;
-      }
-      else
-      {
-        auto res = pq.top();
-        pq.pop();
+	while ( true )
+	{
+	  if ( pq.empty() )
+	  {
+		return std::nullopt;
+	  }
+	  else
+	  {
+		auto res = pq.top();
+		pq.pop();
 
-        if ( res.is_partial_dag )
-        {
-          if ( params.max_level > res.level )
-          {
-            auto ext = get_layer_extension( res, params );
+		if ( res.is_partial_dag )
+		{
+		  if ( params.max_level > res.level )
+		  {
+			auto ext = get_layer_extension( res, params );
 
-            // std::for_each( std::execution::par_unseq, ext.begin(), ext.end(), []( auto&& item ) { cost_fn( item ); } );
-            std::for_each( ext.begin(), ext.end(), [&]( auto&& item ) { cost_fn( item ); } );
+			// std::for_each( std::execution::par_unseq, ext.begin(), ext.end(), []( auto&& item ) { cost_fn( item ); } );
+			std::for_each( ext.begin(), ext.end(), [&]( auto&& item ) { cost_fn( item ); } );
 
-            for ( auto&& t : ext )
-            {
-              t.pdag_id = ( ++next_pdag_id );
-              pq.push( t );
-            }
-          }
+			for ( auto&& t : ext )
+			{
+			  t.pdag_id = ( ++next_pdag_id );
+			  pq.push( t );
+			}
+		  }
 
-          auto dags = get_dags_from_partial_dag( res, params.max_num_in );
+		  auto dags = get_dags_from_partial_dag( res, params.max_num_in );
 
-          // std::for_each( std::execution::par_unseq, dags.begin(), dags.end(), []( auto&& items ) { cost_fn( item ); } );
-          std::for_each( dags.begin(), dags.end(), [&]( auto&& item ) { cost_fn( item ); } );
+		  // std::for_each( std::execution::par_unseq, dags.begin(), dags.end(), []( auto&& items ) { cost_fn( item ); } );
+		  std::for_each( dags.begin(), dags.end(), [&]( auto&& item ) { cost_fn( item ); } );
 
-          for ( auto&& t : dags )
-          {
-            t.pdag_id = res.pdag_id;
-            pq.push( t );
-          }
-        }
-        else
-        {
-          if ( res.input_slots.size() > params.max_num_in )
-          {
-            continue;
-          }
-          else
-          {
-            return res;
-          }
-        }
-      }
-    }
+		  for ( auto&& t : dags )
+		  {
+			t.pdag_id = res.pdag_id;
+			pq.push( t );
+		  }
+		}
+		else
+		{
+		  if ( res.input_slots.size() > params.max_num_in )
+		  {
+			continue;
+		  }
+		  else
+		  {
+			return res;
+		  }
+		}
+	  }
+	}
   }
 
   template<typename FeasibilityFn>
   std::optional<aqfp_logical_network> next_potentially_feasible( FeasibilityFn&& pdag_is_feasible )
   {
-    while ( true )
-    {
-      if ( pq.empty() )
-      {
-        return std::nullopt;
-      }
-      else
-      {
-        auto res = pq.top();
-        pq.pop();
+	while ( true )
+	{
+	  if ( pq.empty() )
+	  {
+		return std::nullopt;
+	  }
+	  else
+	  {
+		auto res = pq.top();
+		pq.pop();
 
-        if ( res.is_partial_dag )
-        {
-          if ( params.max_level > res.level )
-          {
+		if ( res.is_partial_dag )
+		{
+		  if ( params.max_level > res.level )
+		  {
 
-            auto t0 = std::chrono::high_resolution_clock::now();
+			auto t0 = std::chrono::high_resolution_clock::now();
 
-            auto ext = get_layer_extension( res, params );
+			auto ext = get_layer_extension( res, params );
 
-            auto t1 = std::chrono::high_resolution_clock::now();
+			auto t1 = std::chrono::high_resolution_clock::now();
 
-            // std::for_each( std::execution::par_unseq, ext.begin(), ext.end(), []( auto&& item ) { cost_fn( item ); } );
-            auto block_size = 96u;
+			// std::for_each( std::execution::par_unseq, ext.begin(), ext.end(), []( auto&& item ) { cost_fn( item ); } );
+			auto block_size = 96u;
 
-            for ( auto i = 0u; i < ext.size(); i += block_size )
-            {
-              std::vector<std::future<double>> temp;
-              for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
-              {
-                temp.push_back( std::async(
-                    std::launch::async,
-                    [&]( aqfp_logical_network& item ) { cost_fn( item ); return item.computed_cost; }, std::ref( ext[j] ) ) );
-              }
+			for ( auto i = 0u; i < ext.size(); i += block_size )
+			{
+			  std::vector<std::future<double>> temp;
+			  for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
+			  {
+				temp.push_back( std::async(
+					std::launch::async,
+					[&]( aqfp_logical_network& item ) { cost_fn( item ); return item.computed_cost; }, std::ref( ext[j] ) ) );
+			  }
 
-              for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
-              {
-                ext[j].computed_cost = temp[j - i].get();
-              }
-            }
+			  for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
+			  {
+				ext[j].computed_cost = temp[j - i].get();
+			  }
+			}
 
-            auto t2 = std::chrono::high_resolution_clock::now();
+			auto t2 = std::chrono::high_resolution_clock::now();
 
-            auto d1 = std::chrono::duration_cast<std::chrono::microseconds>( t1 - t0 );
-            auto d2 = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 );
+			auto d1 = std::chrono::duration_cast<std::chrono::microseconds>( t1 - t0 );
+			auto d2 = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 );
 
-            fmt::print( "generating {} partial dags took {} microseconds and computing costs took {} microseconds\n", ext.size(), d1.count(), d2.count() );
+			// std::cerr << fmt::format( "generating {} partial dags took {} microseconds and computing costs took {} microseconds\n", ext.size(), d1.count(), d2.count() );
 
-            for ( auto&& t : ext )
-            {
-              t.pdag_id = ( ++next_pdag_id );
-              pq.push( t );
-            }
-          }
-          if ( pdag_is_feasible( res ) )
-          {
-            auto t0 = std::chrono::high_resolution_clock::now();
+			for ( auto&& t : ext )
+			{
+			  t.pdag_id = ( ++next_pdag_id );
+			  pq.push( t );
+			}
+		  }
+		  if ( pdag_is_feasible( res ) )
+		  {
+			auto t0 = std::chrono::high_resolution_clock::now();
 
-            auto dags = get_dags_from_partial_dag( res, params.max_num_in );
+			auto dags = get_dags_from_partial_dag( res, params.max_num_in );
 
-            auto t1 = std::chrono::high_resolution_clock::now();
+			auto t1 = std::chrono::high_resolution_clock::now();
 
-            // std::for_each( std::execution::par_unseq, dags.begin(), dags.end(), []( auto&& items ) { cost_fn( item ); } );
-            auto block_size = 96u;
+			// std::for_each( std::execution::par_unseq, dags.begin(), dags.end(), []( auto&& items ) { cost_fn( item ); } );
+			auto block_size = 96u;
 
-            for ( auto i = 0u; i < dags.size(); i += block_size )
-            {
-              std::vector<std::future<double>> temp;
-              for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
-              {
-                temp.push_back( std::async(
-                    std::launch::async,
-                    [&]( aqfp_logical_network& item ) { cost_fn( item ); return item.computed_cost; }, std::ref( dags[j] ) ) );
-              }
+			for ( auto i = 0u; i < dags.size(); i += block_size )
+			{
+			  std::vector<std::future<double>> temp;
+			  for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
+			  {
+				temp.push_back( std::async(
+					std::launch::async,
+					[&]( aqfp_logical_network& item ) { cost_fn( item ); return item.computed_cost; }, std::ref( dags[j] ) ) );
+			  }
 
-              for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
-              {
-                dags[j].computed_cost = temp[j - i].get();
-              }
-            }
+			  for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
+			  {
+				dags[j].computed_cost = temp[j - i].get();
+			  }
+			}
 
-            auto t2 = std::chrono::high_resolution_clock::now();
+			auto t2 = std::chrono::high_resolution_clock::now();
 
-            auto d1 = std::chrono::duration_cast<std::chrono::microseconds>( t1 - t0 );
-            auto d2 = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 );
+			auto d1 = std::chrono::duration_cast<std::chrono::microseconds>( t1 - t0 );
+			auto d2 = std::chrono::duration_cast<std::chrono::microseconds>( t2 - t1 );
 
-            fmt::print( "generating {} dags took {} microseconds and computing costs took {} microseconds\n", dags.size(), d1.count(), d2.count() );
+			// std::cerr << fmt::format( "generating {} dags took {} microseconds and computing costs took {} microseconds\n", dags.size(), d1.count(), d2.count() );
 
-            for ( auto&& t : dags )
-            {
-              t.pdag_id = res.pdag_id;
-              pq.push( t );
-            }
-          }
-        }
-        else
-        {
-          if ( res.input_slots.size() > params.max_num_in )
-          {
-            continue;
-          }
-          else
-          {
-            return res;
-          }
-        }
-      }
-    }
+			for ( auto&& t : dags )
+			{
+			  t.pdag_id = res.pdag_id;
+			  pq.push( t );
+			}
+		  }
+		  
+		  std::cerr << fmt::format( "expanded partial dag {}\ncurrent size of pq {}\n", as_string(res), pq.size());
+		}
+		else
+		{
+		  if ( res.input_slots.size() > params.max_num_in )
+		  {
+			continue;
+		  }
+		  else
+		  {
+			return res;
+		  }
+		}
+	  }
+	}
   }
 
 private:
   const dag_params params;
   std::function<double( aqfp_logical_network& )> cost_fn;
   std::priority_queue<aqfp_logical_network,
-                      std::vector<aqfp_logical_network>, std::function<double( aqfp_logical_network&, aqfp_logical_network& )>>
-      pq;
+					  std::vector<aqfp_logical_network>, std::function<double( aqfp_logical_network&, aqfp_logical_network& )>>
+	  pq;
   size_t next_pdag_id = 0u;
 };
 
 } // namespace mockturtle
+
