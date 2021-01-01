@@ -88,10 +88,10 @@ signal<Ntk> replace_in_subgraph_rec( Ntk& ntk, signal<Ntk> root_sig, signal<Ntk>
     else
     {
       auto c = get_children( ntk, root_node );
-      result = ntk.create_maj(
-          replace_in_subgraph_rec( ntk, c[0], old_sig, new_sig, cache ),
-          replace_in_subgraph_rec( ntk, c[1], old_sig, new_sig, cache ),
-          replace_in_subgraph_rec( ntk, c[2], old_sig, new_sig, cache ) );
+      auto t1 = replace_in_subgraph_rec( ntk, c[0], old_sig, new_sig, cache );
+      auto t2 = replace_in_subgraph_rec( ntk, c[1], old_sig, new_sig, cache );
+      auto t3 = replace_in_subgraph_rec( ntk, c[2], old_sig, new_sig, cache );
+      result = ntk.create_maj(t1, t2, t3);
     }
     cache[root_node] = result;
   }
@@ -767,7 +767,7 @@ std::vector<signal<Ntk>> maj_of( const kitty::dynamic_truth_table& tt )
   std::vector<signal<Ntk>> empty;
   unsigned long mask_cmp_vars = 0;
   unsigned long mask_dep_vars = 0;
-  for ( int i = 0; i < tt.num_vars(); i++ )
+  for ( auto i = 0u; i < tt.num_vars(); i++ )
   {
     if ( kitty::has_var( tt, i ) )
     {
@@ -818,10 +818,10 @@ signal<Ntk> relabel_recursively( Ntk& ntk, const Ntk& opt_ntk, signal<Ntk> opt_r
     // If the node is already explored, it is not cached in the current implementation.
     // Caching can be implemented to avoid repetitive calls.
     std::vector<signal<Ntk>> c = get_children( opt_ntk, opt_root_node );
-    result = ntk.create_maj(
-        relabel_recursively( ntk, opt_ntk, c[0], sigs ),
-        relabel_recursively( ntk, opt_ntk, c[1], sigs ),
-        relabel_recursively( ntk, opt_ntk, c[2], sigs ) );
+    auto t1 = relabel_recursively( ntk, opt_ntk, c[0], sigs );
+    auto t2 = relabel_recursively( ntk, opt_ntk, c[1], sigs );
+    auto t3 = relabel_recursively( ntk, opt_ntk, c[2], sigs );
+    result = ntk.create_maj(t1, t2, t3);
   }
   // if opt root is complemented, complement the result before returning
   return result ^ opt_root.complement;
@@ -887,10 +887,10 @@ signal<Ntk> replace_with_opt_maj_n( Ntk& ntk, signal<Ntk> root, const std::map<n
     else
     {
       std::vector<signal<Ntk>> c = get_children( ntk, root_node );
-      result = ntk.create_maj(
-          replace_with_opt_maj_n( ntk, c[0], subs ),
-          replace_with_opt_maj_n( ntk, c[1], subs ),
-          replace_with_opt_maj_n( ntk, c[2], subs ) );
+      auto t1 =  replace_with_opt_maj_n( ntk, c[0], subs );
+      auto t2 = replace_with_opt_maj_n( ntk, c[1], subs );
+      auto t3 = replace_with_opt_maj_n( ntk, c[2], subs );
+      result = ntk.create_maj(t1, t2, t3);
     }
   }
   return result ^ root.complement;
