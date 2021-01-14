@@ -7,7 +7,7 @@
 #include <fmt/format.h>
 
 #include "./dag.hpp"
-#include "./gen_dag_util.hpp"
+#include "./utils.hpp"
 
 namespace mockturtle
 {

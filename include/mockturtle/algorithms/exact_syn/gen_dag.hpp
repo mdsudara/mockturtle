@@ -80,7 +80,7 @@ class dag_generator
   using Ntk = aqfp_logical_network_t<NodeT>;
 
 public:
-  dag_generator( const dag_generator_params& params, CostComputerT&& cc ) : params( params ), cc( cc ), pq( dag_compare( cc ) )
+  dag_generator( const dag_generator_params& params, CostComputerT cc ) : params( params ), cc( cc ), pq( dag_compare( cc ) )
   {
 	for ( auto&& fin : params.allowed_num_fanins )
 	{
@@ -146,7 +146,7 @@ public:
 	  if ( should_expand( res ) )
 	  {
 
-		auto dags = get_dags_from_partial_dag( res, params.max_num_in );
+		auto dags = get_dags_from_partial_dag( res );
 
 		if ( params.allow_par_costing )
 		{
@@ -278,7 +278,7 @@ public:
   /**
    * @brief Compute all DAGs derived from a given partial DAG.
    */
-  std::vector<Ntk> get_dags_from_partial_dag( const Ntk& net, uint32_t leaves_lim = 0 )
+  std::vector<Ntk> get_dags_from_partial_dag( const Ntk& net )
   {
 	std::vector<NodeT> leaves = net.last_layer_leaves;
 	leaves.insert( leaves.end(), net.other_leaves.begin(), net.other_leaves.end() );
@@ -287,7 +287,7 @@ public:
 
 	auto max_counts = net.max_equal_fanins();
 
-	auto partitions = partition_gen( leaves, max_counts, leaves_lim, 0 /* unlimited part sizes (fanouts) */ );
+	auto partitions = partition_gen( leaves, max_counts, params.max_num_in, 0 /* unlimited part sizes (fanouts) */ );
 
 	std::vector<Ntk> result;
 	for ( auto p : partitions )

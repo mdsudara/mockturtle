@@ -38,6 +38,40 @@ struct aqfp_logical_network_t
   std::vector<NodeT> last_layer_leaves;            // remaining fanin slots in the last layer
   std::vector<NodeT> other_leaves;                 // remaining fanin slots of the other layers
 
+
+  /**
+   * Compare to logical networks for equality.
+   */
+  bool operator==( const aqfp_logical_network_t<NodeT>& rhs ) const
+  {
+    if ( node_num_fanin != rhs.node_num_fanin )
+      return false;
+
+    if ( nodes.size() != rhs.nodes.size() )
+      return false;
+    for ( auto i = 0u; i < nodes.size(); i++ )
+    {
+      auto x1 = nodes[i];
+      auto x2 = rhs.nodes[i];
+      std::sort( x1.begin(), x1.end() );
+      std::sort( x2.begin(), x2.end() );
+      if ( x1 != x2 )
+        return false;
+    }
+
+    auto y1 = input_slots;
+    auto y2 = rhs.input_slots;
+    std::sort( y1.begin(), y1.end() );
+    std::sort( y2.begin(), y2.end() );
+    if ( y1 != y2 )
+      return false;
+
+    if ( zero_input != rhs.zero_input )
+      return false;
+
+    return true;
+  }
+
   /**
    * Decode a string representation of a DAG into a DAG.
    * Format: ng ni zi k0 g0f0 g0f1 .. g0fk0 k1 g1f0 g1f1 .. g1fk1 ....
