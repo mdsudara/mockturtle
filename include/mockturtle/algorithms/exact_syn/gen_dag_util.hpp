@@ -54,20 +54,20 @@ public:
    * such that no part contains any element 'e' more than 'max_counts[e]' times.
    */
   partition_set operator()(
-	  std::vector<int> elems,
-	  const std::vector<uint32_t>& max_counts = {},
-	  uint32_t max_parts = 0,
-	  uint32_t max_part_size = 0 )
+      std::vector<int> elems,
+      const std::vector<uint32_t>& max_counts = {},
+      uint32_t max_parts = 0,
+      uint32_t max_part_size = 0 )
   {
-	_elems = elems;
-	_max_counts = max_counts;
-	_max_parts = max_parts;
-	_max_part_size = max_part_size;
+    _elems = elems;
+    _max_counts = max_counts;
+    _max_parts = max_parts;
+    _max_part_size = max_part_size;
 
-	const outer_cache_key_t key = { _max_counts, _max_parts, _max_part_size };
-	partition_cache = outer_cache.insert( { key, inner_cache_t() } ).first;
+    const outer_cache_key_t key = { _max_counts, _max_parts, _max_part_size };
+    partition_cache = outer_cache.insert( { key, inner_cache_t() } ).first;
 
-	return get_all_partitions();
+    return get_all_partitions();
   }
 
 private:
@@ -81,60 +81,60 @@ private:
 
   partition_set get_all_partitions()
   {
-	if ( _elems.size() == 0 )
-	{
-	  return { {} }; // return the empty partition.
-	}
+    if ( _elems.size() == 0 )
+    {
+      return { {} }; // return the empty partition.
+    }
 
-	inner_cache_key_t key = _elems;
-	if ( partition_cache->second.count( key ) )
-	{
-	  return partition_cache->second.at( key );
-	}
+    inner_cache_key_t key = _elems;
+    if ( partition_cache->second.count( key ) )
+    {
+      return partition_cache->second.at( key );
+    }
 
-	partition_set result;
+    partition_set result;
 
-	auto last = _elems.back();
-	_elems.pop_back();
+    auto last = _elems.back();
+    _elems.pop_back();
 
-	auto temp = get_all_partitions();
+    auto temp = get_all_partitions();
 
-	for ( auto&& t : temp )
-	{
-	  partition cpy;
+    for ( auto&& t : temp )
+    {
+      partition cpy;
 
-	  // take 'last' in its own partition
-	  cpy = t;
+      // take 'last' in its own partition
+      cpy = t;
 
-	  if ( _max_parts == 0u || _max_parts > cpy.size() )
-	  {
-		cpy.insert( { last } );
-		result.insert( cpy );
-	  }
+      if ( _max_parts == 0u || _max_parts > cpy.size() )
+      {
+        cpy.insert( { last } );
+        result.insert( cpy );
+      }
 
-	  // add 'last' to one of the existing partitions
-	  for ( auto it = t.begin(); it != t.end(); )
-	  {
-		if ( _max_counts.empty() || it->count( last ) < _max_counts[last] )
-		{
+      // add 'last' to one of the existing partitions
+      for ( auto it = t.begin(); it != t.end(); )
+      {
+        if ( _max_counts.empty() || it->count( last ) < _max_counts[last] )
+        {
 
-		  if ( _max_part_size == 0 || _max_part_size > it->size() )
-		  {
-			cpy = t;
-			auto elem_it = cpy.find( *it );
-			auto cpy_elem = *elem_it;
-			cpy_elem.insert( last );
-			cpy.erase( elem_it );
-			cpy.insert( cpy_elem );
-			result.insert( cpy );
-		  }
-		}
+          if ( _max_part_size == 0 || _max_part_size > it->size() )
+          {
+            cpy = t;
+            auto elem_it = cpy.find( *it );
+            auto cpy_elem = *elem_it;
+            cpy_elem.insert( last );
+            cpy.erase( elem_it );
+            cpy.insert( cpy_elem );
+            result.insert( cpy );
+          }
+        }
 
-		std::advance( it, t.count( *it ) );
-	  }
-	}
+        std::advance( it, t.count( *it ) );
+      }
+    }
 
-	return ( partition_cache->second[key] = result );
+    return ( partition_cache->second[key] = result );
   }
 };
 
@@ -159,15 +159,15 @@ public:
    */
   partition_set operator()( std::vector<ElemT> elems, partition base, const std::vector<uint32_t>& max_counts, uint32_t max_part_size = 0 )
   {
-	_elems = elems;
-	_base = base;
-	_max_counts = max_counts;
-	_max_part_size = max_part_size;
+    _elems = elems;
+    _base = base;
+    _max_counts = max_counts;
+    _max_part_size = max_part_size;
 
-	const outer_cache_key_t key = { _base, _max_counts, _max_part_size };
-	partition_cache = outer_cache.insert( { key, inner_cache_t() } ).first;
+    const outer_cache_key_t key = { _base, _max_counts, _max_part_size };
+    partition_cache = outer_cache.insert( { key, inner_cache_t() } ).first;
 
-	return extend_partitions();
+    return extend_partitions();
   }
 
 private:
@@ -181,49 +181,49 @@ private:
 
   partition_set extend_partitions()
   {
-	if ( _elems.size() == 0 )
-	{
-	  return { _base };
-	}
+    if ( _elems.size() == 0 )
+    {
+      return { _base };
+    }
 
-	inner_cache_key_t key = _elems;
-	if ( partition_cache->second.count( key ) )
-	{
-	  return partition_cache->second.at( key );
-	}
+    inner_cache_key_t key = _elems;
+    if ( partition_cache->second.count( key ) )
+    {
+      return partition_cache->second.at( key );
+    }
 
-	partition_set result;
+    partition_set result;
 
-	auto last = _elems.back();
-	_elems.pop_back();
+    auto last = _elems.back();
+    _elems.pop_back();
 
-	auto temp = extend_partitions();
-	for ( auto&& t : temp )
-	{
-	  partition cpy;
+    auto temp = extend_partitions();
+    for ( auto&& t : temp )
+    {
+      partition cpy;
 
-	  for ( auto it = t.begin(); it != t.end(); )
-	  {
-		if ( it->count( last ) < _max_counts.at( last ) )
-		{
+      for ( auto it = t.begin(); it != t.end(); )
+      {
+        if ( it->count( last ) < _max_counts.at( last ) )
+        {
 
-		  if ( _max_part_size == 0 || _max_part_size > it->size() )
-		  {
-			cpy = t;
-			auto elem_it = cpy.find( *it );
-			auto cpy_elem = *elem_it;
-			cpy_elem.insert( last );
-			cpy.erase( elem_it );
-			cpy.insert( cpy_elem );
-			result.insert( cpy );
-		  }
-		}
+          if ( _max_part_size == 0 || _max_part_size > it->size() )
+          {
+            cpy = t;
+            auto elem_it = cpy.find( *it );
+            auto cpy_elem = *elem_it;
+            cpy_elem.insert( last );
+            cpy.erase( elem_it );
+            cpy.insert( cpy_elem );
+            result.insert( cpy );
+          }
+        }
 
-		std::advance( it, t.count( *it ) );
-	  }
-	}
+        std::advance( it, t.count( *it ) );
+      }
+    }
 
-	return ( partition_cache->second[key] = result );
+    return ( partition_cache->second[key] = result );
   }
 };
 
@@ -240,8 +240,8 @@ public:
    */
   std::set<std::vector<ElemT>> operator()( std::vector<ElemT> elems )
   {
-	elem_counts = get_frequencies( elems );
-	return get_sub_lists_recur();
+    elem_counts = get_frequencies( elems );
+    return get_sub_lists_recur();
   }
 
 private:
@@ -250,49 +250,48 @@ private:
 
   std::set<std::vector<ElemT>> get_sub_lists_recur()
   {
-	if ( elem_counts.size() == 0u )
-	{
-	  return { {} };
-	}
+    if ( elem_counts.size() == 0u )
+    {
+      return { {} };
+    }
 
-	sub_list_cache_key_t key = elem_counts;
-	if ( !sub_list_cache.count( key ) )
-	{
-	  auto last = std::prev( elem_counts.end() );
-	  auto last_elem = last->first;
-	  auto last_count = last->second;
-	  elem_counts.erase( last );
+    sub_list_cache_key_t key = elem_counts;
+    if ( !sub_list_cache.count( key ) )
+    {
+      auto last = std::prev( elem_counts.end() );
+      auto last_elem = last->first;
+      auto last_count = last->second;
+      elem_counts.erase( last );
 
-	  std::set<std::vector<int>> result;
+      std::set<std::vector<int>> result;
 
-	  std::vector<int> t;
-	  for ( auto i = last_count; i > 0; --i )
-	  {
-		t.push_back( last_elem );
-		result.insert( t ); // insert a copy of t, and note that t is already sorted.
-	  }
+      std::vector<int> t;
+      for ( auto i = last_count; i > 0; --i )
+      {
+        t.push_back( last_elem );
+        result.insert( t ); // insert a copy of t, and note that t is already sorted.
+      }
 
-	  auto temp = get_sub_lists_recur();
+      auto temp = get_sub_lists_recur();
 
-	  for ( std::vector<int> t : temp )
-	  {
-		result.insert( t );
-		for ( auto i = last_count; i > 0; --i )
-		{
-		  t.push_back( last_elem );
-		  std::sort( t.begin(), t.end() );
-		  result.insert( t );
-		}
-	  }
+      for ( std::vector<int> t : temp )
+      {
+        result.insert( t );
+        for ( auto i = last_count; i > 0; --i )
+        {
+          t.push_back( last_elem );
+          std::sort( t.begin(), t.end() );
+          result.insert( t );
+        }
+      }
 
-	  sub_list_cache[key] = result;
-	}
+      sub_list_cache[key] = result;
+    }
 
-	return sub_list_cache[key];
+    return sub_list_cache[key];
   }
 };
 
 } // namespace detail
 
 } // namespace mockturtle
-

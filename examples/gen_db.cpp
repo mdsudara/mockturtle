@@ -8,10 +8,10 @@
 #include <thread>
 #include <vector>
 
-#include <mockturtle/algorithms/exact_syn/gen_dag.hpp>
-#include <mockturtle/algorithms/exact_syn/sat.hpp>
 #include <mockturtle/algorithms/exact_syn/dag_cost.hpp>
+#include <mockturtle/algorithms/exact_syn/gen_dag.hpp>
 #include <mockturtle/algorithms/exact_syn/generate_db.hpp>
+#include <mockturtle/algorithms/exact_syn/sat.hpp>
 
 void generate_dag_db()
 {
@@ -35,7 +35,7 @@ void generate_dag_db()
 void generate_cost_db()
 {
   using Ntk = mockturtle::aqfp_logical_network_t<int>;
-  mockturtle::aqfp_cost_computer<Ntk> cc( {{3u, 3.0}}, {{3u, 3.0}}, 1.0, 4u );
+  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 3.0 } }, { { 3u, 3.0 } }, 1.0, 4u );
   mockturtle::cost_all_dags( std::cin, std::cout, cc, 1u );
 }
 
@@ -67,34 +67,34 @@ void test_sat_based_exact_syn()
   mockturtle::dag_generator<int, mockturtle::simple_cost_computer<Ntk>> gen( params, mockturtle::simple_cost_computer<Ntk>( { { 3u, 3.0 }, { 5u, 5.0 } } ) );
   while ( true )
   {
-	auto should_expand_pdag = [&]( Ntk net ) {
-	  for ( auto&& t : net.last_layer_leaves )
-	  {
-		net.add_leaf_node( { t } );
-	  }
+    auto should_expand_pdag = [&]( Ntk net ) {
+      for ( auto&& t : net.last_layer_leaves )
+      {
+        net.add_leaf_node( { t } );
+      }
 
-	  for ( auto&& t : net.other_leaves )
-	  {
-		net.add_leaf_node( { t } );
-	  }
+      for ( auto&& t : net.other_leaves )
+      {
+        net.add_leaf_node( { t } );
+      }
 
-	  net.last_layer_leaves.clear();
-	  net.other_leaves.clear();
+      net.last_layer_leaves.clear();
+      net.other_leaves.clear();
 
-	  return mockturtle::is_synthesizable( net, 4u, tt, 10u );
-	};
+      return mockturtle::is_synthesizable( net, 4u, tt, 10u );
+    };
 
-	auto netopt = gen.next_dag( should_expand_pdag );
+    auto netopt = gen.next_dag( should_expand_pdag );
 
-	if ( netopt == std::nullopt )
-	{
-	  break;
-	}
+    if ( netopt == std::nullopt )
+    {
+      break;
+    }
 
-	auto net = netopt.value();
-	auto res = mockturtle::is_synthesizable( net, 4u, tt, 1u );
+    auto net = netopt.value();
+    auto res = mockturtle::is_synthesizable( net, 4u, tt, 1u );
 
-	fmt::print( "dag {} {} synthesize 0x{:04x}\n", net.encode_as_string(), res ? "can" : "cannot", tt );
+    fmt::print( "dag {} {} synthesize 0x{:04x}\n", net.encode_as_string(), res ? "can" : "cannot", tt );
   }
 }
 
@@ -105,37 +105,36 @@ int main( int argc, char** argv )
 
   if ( argc < 2 )
   {
-	std::cerr << fmt::format( "Not enough arguments.\n" );
-	return 0;
+    std::cerr << fmt::format( "Not enough arguments.\n" );
+    return 0;
   }
 
   std::string cmd( argv[1] );
   if ( cmd == "gd" )
   {
-	generate_dag_db();
+    generate_dag_db();
   }
   else if ( cmd == "cd" )
   {
-	generate_cost_db();
+    generate_cost_db();
   }
   else if ( cmd == "sd" )
   {
-	generate_dag_npn_db();
+    generate_dag_npn_db();
   }
   else if ( cmd == "ts" )
   {
-	test_sat_based_exact_syn();
+    test_sat_based_exact_syn();
   }
   else
   {
-	std::cerr << fmt::format( "Invalid command {}. Must be one of the following:\n"
-							  "\tgd -- for generating DAGs\n"
-							  "\tcd -- for costing DAGs\n"
-							  "\tsd -- for simulating DAGs\n"
-							  "\tts -- for testing SAT-based exact synthesis\n",
-							  cmd );
+    std::cerr << fmt::format( "Invalid command {}. Must be one of the following:\n"
+                              "\tgd -- for generating DAGs\n"
+                              "\tcd -- for costing DAGs\n"
+                              "\tsd -- for simulating DAGs\n"
+                              "\tts -- for testing SAT-based exact synthesis\n",
+                              cmd );
   }
 
   return 0;
 }
-

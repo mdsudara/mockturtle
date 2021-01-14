@@ -5,10 +5,10 @@
 #include <kitty/kitty.hpp>
 
 #include "./dag.hpp"
-#include "./gen_dag.hpp"
 #include "./dag_cost.hpp"
-#include "./simulate_dag.hpp"
+#include "./gen_dag.hpp"
 #include "./sat.hpp"
+#include "./simulate_dag.hpp"
 
 namespace mockturtle
 {
@@ -29,23 +29,23 @@ void compute_tt_to_npn_class_mapping( uint32_t num_vars, std::vector<uint32_t>& 
   kitty::dynamic_truth_table dtt( num_vars );
   do
   {
-	auto npn = kitty::exact_npn_canonization( dtt );
-	auto npn_dtt = std::get<0>( npn );
+    auto npn = kitty::exact_npn_canonization( dtt );
+    auto npn_dtt = std::get<0>( npn );
 
-	if ( !npn_to_id.count( npn_dtt._bits[0] ) )
-	{
-	  assert( npn_dtt == dtt );
-	  npn_to_id[npn_dtt._bits[0]] = npn_to_id.size();
-	}
-	tt_to_id[dtt._bits[0]] = npn_to_id[npn_dtt._bits[0]];
+    if ( !npn_to_id.count( npn_dtt._bits[0] ) )
+    {
+      assert( npn_dtt == dtt );
+      npn_to_id[npn_dtt._bits[0]] = npn_to_id.size();
+    }
+    tt_to_id[dtt._bits[0]] = npn_to_id[npn_dtt._bits[0]];
 
-	kitty::next_inplace( dtt );
+    kitty::next_inplace( dtt );
   } while ( !kitty::is_const0( dtt ) );
 
   id_to_npn = std::vector<uint64_t>( npn_to_id.size(), 0ul );
   for ( auto it = npn_to_id.begin(); it != npn_to_id.end(); it++ )
   {
-	id_to_npn[it->second] = it->first;
+    id_to_npn[it->second] = it->first;
   }
 }
 
@@ -62,27 +62,27 @@ void generate_all_dags( const mockturtle::dag_generator_params& params, std::ost
   auto count = 0u;
   while ( true )
   {
-	auto result_opt = gen.next_dag( []( auto& net ) {(void) net; return true; } );
+    auto result_opt = gen.next_dag( []( auto& net ) {(void) net; return true; } );
 
-	if ( result_opt == std::nullopt )
-	{
-	  /* No more DAGs */
-	  if ( verbose > 0 )
-	  {
-		std::cerr << "Finished generating DAGs" << std::endl;
-	  }
-	  break;
-	}
-	auto result = result_opt.value();
+    if ( result_opt == std::nullopt )
+    {
+      /* No more DAGs */
+      if ( verbose > 0 )
+      {
+        std::cerr << "Finished generating DAGs" << std::endl;
+      }
+      break;
+    }
+    auto result = result_opt.value();
 
-	os << fmt::format( "{}\n", result.encode_as_string() );
+    os << fmt::format( "{}\n", result.encode_as_string() );
 
-	if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
-	{
-	  auto t1 = std::chrono::high_resolution_clock::now();
-	  auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
-	  std::cerr << fmt::format( "Number of DAGs generated {:8d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
-	}
+    if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
+    {
+      auto t1 = std::chrono::high_resolution_clock::now();
+      auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
+      std::cerr << fmt::format( "Number of DAGs generated {:8d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
+    }
   }
 }
 
@@ -97,25 +97,25 @@ void cost_all_dags( std::istream& is, std::ostream& os, CostComputerT&& cc, uint
 
   while ( getline( is, temp ) )
   {
-	if ( temp.length() > 0 )
-	{
-	  if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000u == 0u ) )
-	  {
-		std::cerr << fmt::format( "Processing dag {} [{}]\n", ++count, temp );
-	  }
+    if ( temp.length() > 0 )
+    {
+      if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000u == 0u ) )
+      {
+        std::cerr << fmt::format( "Processing dag {} [{}]\n", ++count, temp );
+      }
 
-	  mockturtle::aqfp_logical_network_t<int> net;
-	  net.decode_dag( temp );
+      mockturtle::aqfp_logical_network_t<int> net;
+      net.decode_dag( temp );
 
-	  auto costs = cc.cost_all_level_configurations( net );
+      auto costs = cc.cost_all_level_configurations( net );
 
-	  os << "begin" << std::endl;
-	  for ( auto it = costs.begin(); it != costs.end(); it++ )
-	  {
-		os << fmt::format( "{:08x} {}\n", it->first, it->second );
-	  }
-	  os << "end" << std::endl;
-	}
+      os << "begin" << std::endl;
+      for ( auto it = costs.begin(); it != costs.end(); it++ )
+      {
+        os << fmt::format( "{:08x} {}\n", it->first, it->second );
+      }
+      os << "end" << std::endl;
+    }
   }
 }
 
@@ -133,20 +133,20 @@ void simulate_all_dags( std::istream& is, std::ostream& os, uint32_t verbose = 0
 
   if ( verbose > 0 )
   {
-	std::cerr << fmt::format( "find map from truthtable to npn id...\n" );
+    std::cerr << fmt::format( "find map from truthtable to npn id...\n" );
   }
   detail::compute_tt_to_npn_class_mapping( 4u, tt_to_id, id_to_npn );
   if ( verbose > 0 )
   {
-	std::cerr << fmt::format( "found map from truthtable to npn id...\n" );
+    std::cerr << fmt::format( "found map from truthtable to npn id...\n" );
   }
 
   std::vector<uint64_t> input_tt = {
-	  0x0000UL,
-	  0xaaaaUL,
-	  0xccccUL,
-	  0xf0f0UL,
-	  0xff00UL,
+      0x0000UL,
+      0xaaaaUL,
+      0xccccUL,
+      0xf0f0UL,
+      0xff00UL,
   };
 
   dag_simulator<uint64_t> dag_sim( input_tt );
@@ -155,30 +155,31 @@ void simulate_all_dags( std::istream& is, std::ostream& os, uint32_t verbose = 0
   uint32_t count = 0u;
   while ( getline( is, temp ) )
   {
-	if ( temp.length() > 0 )
-	{
-	  if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
-	  {
-		std::cerr << fmt::format( "processing dag {} [{}]\n", count, temp );
-	  }
+    if ( temp.length() > 0 )
+    {
+      if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
+      {
+        std::cerr << fmt::format( "processing dag {} [{}]\n", count, temp );
+      }
 
-	  mockturtle::aqfp_logical_network_t net;
-	  net.decode_dag( temp );
+      mockturtle::aqfp_logical_network_t net;
+      net.decode_dag( temp );
 
-	  if (net.zero_input == 0 && net.input_slots.size() > 4u) {
-		continue;
-	  }
+      if ( net.zero_input == 0 && net.input_slots.size() > 4u )
+      {
+        continue;
+      }
 
-	  uint64_t npn_flags[4] = { 0ul, 0ul, 0ul, 0ul };
-	  auto funcs = dag_sim.all_functions_from_dag( net );
-	  for ( auto f : funcs )
-	  {
-		auto id = tt_to_id[f];
-		npn_flags[id / 64ul] |= ( 1ul << ( id % 64ul ) );
-	  }
+      uint64_t npn_flags[4] = { 0ul, 0ul, 0ul, 0ul };
+      auto funcs = dag_sim.all_functions_from_dag( net );
+      for ( auto f : funcs )
+      {
+        auto id = tt_to_id[f];
+        npn_flags[id / 64ul] |= ( 1ul << ( id % 64ul ) );
+      }
 
-	  os << fmt::format( "{:16x} {:16x} {:16x} {:16x}\n", npn_flags[0], npn_flags[1], npn_flags[2], npn_flags[3] );
-	}
+      os << fmt::format( "{:16x} {:16x} {:16x} {:16x}\n", npn_flags[0], npn_flags[1], npn_flags[2], npn_flags[3] );
+    }
   }
 }
 
@@ -190,4 +191,3 @@ bool is_synthesizable( const Ntk& ntk, const int32_t num_inputs, const TruthTabl
 }
 
 } // namespace mockturtle
-

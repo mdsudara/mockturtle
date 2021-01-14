@@ -39,14 +39,14 @@ struct dag_generator_params
   uint32_t verbose;
 
   dag_generator_params() : max_gates( std::numeric_limits<uint32_t>::max() ),
-						   max_num_fanout( std::numeric_limits<uint32_t>::max() ),
-						   max_width( std::numeric_limits<uint32_t>::max() ),
-						   max_num_in( std::numeric_limits<uint32_t>::max() ),
-						   allowed_num_fanins( { 3u } ),
-						   max_gates_of_fanin( { { 3u, std::numeric_limits<uint32_t>::max() } } ),
-						   allow_par_costing(false),
-						   cost_threads(1u),
-						   verbose(0u) {}
+                           max_num_fanout( std::numeric_limits<uint32_t>::max() ),
+                           max_width( std::numeric_limits<uint32_t>::max() ),
+                           max_num_in( std::numeric_limits<uint32_t>::max() ),
+                           allowed_num_fanins( { 3u } ),
+                           max_gates_of_fanin( { { 3u, std::numeric_limits<uint32_t>::max() } } ),
+                           allow_par_costing( false ),
+                           cost_threads( 1u ),
+                           verbose( 0u ) {}
 };
 
 template<typename CostComputerT>
@@ -65,9 +65,9 @@ public:
   template<typename Ntk>
   bool operator()( Ntk& f, Ntk& s )
   {
-	auto cf = cc( f );
-	auto cs = cc( s );
-	return ( cf > cs ) || ( cf == cs && !s.is_partial_dag && f.is_partial_dag );
+    auto cf = cc( f );
+    auto cs = cc( s );
+    return ( cf > cs ) || ( cf == cs && !s.is_partial_dag && f.is_partial_dag );
   }
 
 private:
@@ -82,111 +82,111 @@ class dag_generator
 public:
   dag_generator( const dag_generator_params& params, CostComputerT cc ) : params( params ), cc( cc ), pq( dag_compare( cc ) )
   {
-	for ( auto&& fin : params.allowed_num_fanins )
-	{
-	  if ( params.max_gates_of_fanin.at( fin ) > 0 )
-	  {
-		auto root = aqfp_logical_network_t<int>::get_root( fin );
-		root.pdag_id = ( ++next_pdag_id );
-		pq.push( root );
-	  }
-	}
+    for ( auto&& fin : params.allowed_num_fanins )
+    {
+      if ( params.max_gates_of_fanin.at( fin ) > 0 )
+      {
+        auto root = aqfp_logical_network_t<int>::get_root( fin );
+        root.pdag_id = ( ++next_pdag_id );
+        pq.push( root );
+      }
+    }
   }
 
   template<typename PredicateT>
   std::optional<Ntk> next_dag( PredicateT&& should_expand )
   {
-	while ( true )
-	{
-	  if ( pq.empty() )
-	  {
-		return std::nullopt;
-	  }
+    while ( true )
+    {
+      if ( pq.empty() )
+      {
+        return std::nullopt;
+      }
 
-	  auto res = pq.top();
-	  pq.pop();
+      auto res = pq.top();
+      pq.pop();
 
-	  if ( !res.is_partial_dag )
-	  {
-		return res;
-	  }
+      if ( !res.is_partial_dag )
+      {
+        return res;
+      }
 
-	  if ( params.max_levels > res.num_levels )
-	  {
-		auto ext = get_layer_extension( res );
+      if ( params.max_levels > res.num_levels )
+      {
+        auto ext = get_layer_extension( res );
 
-		if ( params.allow_par_costing )
-		{
-		  auto block_size = params.cost_threads;
+        if ( params.allow_par_costing )
+        {
+          auto block_size = params.cost_threads;
 
-		  for ( auto i = 0u; i < ext.size(); i += block_size )
-		  {
-			std::vector<std::future<double>> temp;
-			for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
-			{
-			  temp.push_back( std::async(
-				  std::launch::async,
-				  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( ext[j] ) ) );
-			}
+          for ( auto i = 0u; i < ext.size(); i += block_size )
+          {
+            std::vector<std::future<double>> temp;
+            for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
+            {
+              temp.push_back( std::async(
+                  std::launch::async,
+                  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( ext[j] ) ) );
+            }
 
-			for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
-			{
-			  ext[j].computed_cost = temp[j - i].get();
-			}
-		  }
-		}
+            for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
+            {
+              ext[j].computed_cost = temp[j - i].get();
+            }
+          }
+        }
 
-		for ( auto&& t : ext )
-		{
-		  t.pdag_id = ( ++next_pdag_id );
-		  pq.push( t );
-		}
-	  }
+        for ( auto&& t : ext )
+        {
+          t.pdag_id = ( ++next_pdag_id );
+          pq.push( t );
+        }
+      }
 
-	  if ( should_expand( res ) )
-	  {
+      if ( should_expand( res ) )
+      {
 
-		auto dags = get_dags_from_partial_dag( res );
+        auto dags = get_dags_from_partial_dag( res );
 
-		if ( params.allow_par_costing )
-		{
-		  auto block_size = params.cost_threads;
+        if ( params.allow_par_costing )
+        {
+          auto block_size = params.cost_threads;
 
-		  for ( auto i = 0u; i < dags.size(); i += block_size )
-		  {
-			std::vector<std::future<double>> temp;
-			for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
-			{
-			  temp.push_back( std::async(
-				  std::launch::async,
-				  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( dags[j] ) ) );
-			}
+          for ( auto i = 0u; i < dags.size(); i += block_size )
+          {
+            std::vector<std::future<double>> temp;
+            for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
+            {
+              temp.push_back( std::async(
+                  std::launch::async,
+                  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( dags[j] ) ) );
+            }
 
-			for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
-			{
-			  dags[j].computed_cost = temp[j - i].get();
-			}
-		  }
-		}
+            for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
+            {
+              dags[j].computed_cost = temp[j - i].get();
+            }
+          }
+        }
 
-		for ( auto&& t : dags )
-		{
-		  t.pdag_id = res.pdag_id;
-		  pq.push( t );
-		}
-	  }
+        for ( auto&& t : dags )
+        {
+          t.pdag_id = res.pdag_id;
+          pq.push( t );
+        }
+      }
 
-	  if ( params.verbose > 0u )
-	  {
-		std::cerr << fmt::format( "expanded partial dag {}\ncurrent size of pq {}\n", as_string( res ), pq.size() );
-	  }
-	}
+      if ( params.verbose > 0u )
+      {
+        std::cerr << fmt::format( "expanded partial dag {}\ncurrent size of pq {}\n", as_string( res ), pq.size() );
+      }
+    }
   }
 
   std::optional<Ntk> next_dag()
   {
-	static auto always_expand = []( Ntk& net ) { (void) net; return true; };
-	return next_dag( always_expand );
+    static auto always_expand = []( Ntk& net ) { (void) net; return true; };
+    return next_dag( always_expand );
   }
 
   /**
@@ -194,85 +194,85 @@ public:
    */
   std::vector<Ntk> get_layer_extension( const Ntk& net )
   {
-	// Choose which last layer slots to use
-	// Choose which non-last later slots to use
-	// get partitions of the chosen last layer slots
-	// extend the partitions using chosen non-last layer slots
+    // Choose which last layer slots to use
+    // Choose which non-last later slots to use
+    // get partitions of the chosen last layer slots
+    // extend the partitions using chosen non-last layer slots
 
-	std::vector<Ntk> result;
+    std::vector<Ntk> result;
 
-	auto max_counts = net.max_equal_fanins();
+    auto max_counts = net.max_equal_fanins();
 
-	auto last_options = sublist_gen( net.last_layer_leaves );
-	auto other_options = sublist_gen( net.other_leaves );
+    auto last_options = sublist_gen( net.last_layer_leaves );
+    auto other_options = sublist_gen( net.other_leaves );
 
-	const auto last_counts = detail::get_frequencies( net.last_layer_leaves );
-	const auto other_counts = detail::get_frequencies( net.other_leaves );
+    const auto last_counts = detail::get_frequencies( net.last_layer_leaves );
+    const auto other_counts = detail::get_frequencies( net.other_leaves );
 
-	/* Consider all different ways of choosing a non-empty subset of last layer slots */
-	for ( auto&& last : last_options )
-	{
-	  if ( last.empty() )
-		continue;
+    /* Consider all different ways of choosing a non-empty subset of last layer slots */
+    for ( auto&& last : last_options )
+    {
+      if ( last.empty() )
+        continue;
 
-	  /* Remaining slots in the last layer */
-	  auto last_counts_cpy = last_counts;
-	  for ( auto&& e : last )
-	  {
-		last_counts_cpy[e]--;
-	  }
+      /* Remaining slots in the last layer */
+      auto last_counts_cpy = last_counts;
+      for ( auto&& e : last )
+      {
+        last_counts_cpy[e]--;
+      }
 
-	  /* Consider all different ways of choosing a subset of other layer slots */
-	  for ( auto&& other : other_options )
-	  {
+      /* Consider all different ways of choosing a subset of other layer slots */
+      for ( auto&& other : other_options )
+      {
 
-		/* Remaining slots in the other layers */
-		auto other_counts_cpy = other_counts;
-		for ( auto&& e : other )
-		{
-		  other_counts_cpy[e]--;
-		}
+        /* Remaining slots in the other layers */
+        auto other_counts_cpy = other_counts;
+        for ( auto&& e : other )
+        {
+          other_counts_cpy[e]--;
+        }
 
-		/* Compute the new set of other leaves for all resulting partial DAGs */
-		std::vector<int> other_leaves_new;
-		for ( auto it = last_counts_cpy.begin(); it != last_counts_cpy.end(); it++ )
-		{
-		  for ( auto i = 0u; i < it->second; i++ )
-		  {
-			other_leaves_new.push_back( it->first );
-		  }
-		}
-		for ( auto it = other_counts_cpy.begin(); it != other_counts_cpy.end(); it++ )
-		{
-		  for ( auto i = 0u; i < it->second; i++ )
-		  {
-			other_leaves_new.push_back( it->first );
-		  }
-		}
+        /* Compute the new set of other leaves for all resulting partial DAGs */
+        std::vector<int> other_leaves_new;
+        for ( auto it = last_counts_cpy.begin(); it != last_counts_cpy.end(); it++ )
+        {
+          for ( auto i = 0u; i < it->second; i++ )
+          {
+            other_leaves_new.push_back( it->first );
+          }
+        }
+        for ( auto it = other_counts_cpy.begin(); it != other_counts_cpy.end(); it++ )
+        {
+          for ( auto i = 0u; i < it->second; i++ )
+          {
+            other_leaves_new.push_back( it->first );
+          }
+        }
 
-		if ( params.max_gates == 0 || params.max_gates > net.num_gates() )
-		{
-		  auto max_gates = params.max_gates > 0u ? params.max_gates - net.num_gates() : 0u;
-		  auto last_layers_partitions = partition_gen( last, max_counts, max_gates, params.max_num_fanout );
+        if ( params.max_gates == 0 || params.max_gates > net.num_gates() )
+        {
+          auto max_gates = params.max_gates > 0u ? params.max_gates - net.num_gates() : 0u;
+          auto last_layers_partitions = partition_gen( last, max_counts, max_gates, params.max_num_fanout );
 
-		  for ( auto p : last_layers_partitions )
-		  {
-			auto extensions = partition_ext( other, p, max_counts, params.max_num_fanout );
-			for ( auto q : extensions )
-			{
-			  auto temp = get_next_partial_dags( net, q, other_leaves_new );
-			  for ( auto&& r : temp )
-			  {
-				r.num_levels++;
-				result.push_back( r );
-			  }
-			}
-		  }
-		}
-	  }
-	}
+          for ( auto p : last_layers_partitions )
+          {
+            auto extensions = partition_ext( other, p, max_counts, params.max_num_fanout );
+            for ( auto q : extensions )
+            {
+              auto temp = get_next_partial_dags( net, q, other_leaves_new );
+              for ( auto&& r : temp )
+              {
+                r.num_levels++;
+                result.push_back( r );
+              }
+            }
+          }
+        }
+      }
+    }
 
-	return result;
+    return result;
   }
 
   /**
@@ -280,30 +280,30 @@ public:
    */
   std::vector<Ntk> get_dags_from_partial_dag( const Ntk& net )
   {
-	std::vector<NodeT> leaves = net.last_layer_leaves;
-	leaves.insert( leaves.end(), net.other_leaves.begin(), net.other_leaves.end() );
+    std::vector<NodeT> leaves = net.last_layer_leaves;
+    leaves.insert( leaves.end(), net.other_leaves.begin(), net.other_leaves.end() );
 
-	std::sort( leaves.begin(), leaves.end() );
+    std::sort( leaves.begin(), leaves.end() );
 
-	auto max_counts = net.max_equal_fanins();
+    auto max_counts = net.max_equal_fanins();
 
-	auto partitions = partition_gen( leaves, max_counts, params.max_num_in, 0 /* unlimited part sizes (fanouts) */ );
+    auto partitions = partition_gen( leaves, max_counts, params.max_num_in, 0 /* unlimited part sizes (fanouts) */ );
 
-	std::vector<Ntk> result;
-	for ( auto p : partitions )
-	{
-	  auto new_net = get_next_dag( net, p );
-	  result.push_back( new_net );
+    std::vector<Ntk> result;
+    for ( auto p : partitions )
+    {
+      auto new_net = get_next_dag( net, p );
+      result.push_back( new_net );
 
-	  for ( auto i = 0u; i < new_net.input_slots.size(); i++ )
-	  {
-		auto temp_net = new_net;
-		temp_net.zero_input = new_net.input_slots[i];
-		result.push_back( temp_net );
-	  }
-	}
+      for ( auto i = 0u; i < new_net.input_slots.size(); i++ )
+      {
+        auto temp_net = new_net;
+        temp_net.zero_input = new_net.input_slots[i];
+        result.push_back( temp_net );
+      }
+    }
 
-	return result;
+    return result;
   }
 
   /**
@@ -313,24 +313,24 @@ public:
    */
   std::vector<Ntk> get_next_partial_dags( const Ntk& orig, const partition& p, const std::vector<int>& other_leaves )
   {
-	auto max_allowed_of_fanin = params.max_gates_of_fanin;
-	for ( auto it = orig.num_gates_of_fanin.begin(); it != orig.num_gates_of_fanin.end(); it++ )
-	{
-	  assert( max_allowed_of_fanin[it->first] >= it->second );
-	  max_allowed_of_fanin[it->first] -= it->second;
-	}
+    auto max_allowed_of_fanin = params.max_gates_of_fanin;
+    for ( auto it = orig.num_gates_of_fanin.begin(); it != orig.num_gates_of_fanin.end(); it++ )
+    {
+      assert( max_allowed_of_fanin[it->first] >= it->second );
+      max_allowed_of_fanin[it->first] -= it->second;
+    }
 
-	std::vector<part> q( p.begin(), p.end() );
+    std::vector<part> q( p.begin(), p.end() );
 
-	/* For each part in partition 'p', consider different types of gates to connect. */
-	auto res = add_node_recur( orig, q, 0, max_allowed_of_fanin );
+    /* For each part in partition 'p', consider different types of gates to connect. */
+    auto res = add_node_recur( orig, q, 0, max_allowed_of_fanin );
 
-	for ( auto&& net : res )
-	{
-	  net.other_leaves = other_leaves;
-	}
+    for ( auto&& net : res )
+    {
+      net.other_leaves = other_leaves;
+    }
 
-	return res;
+    return res;
   }
 
   /**
@@ -338,35 +338,35 @@ public:
    */
   std::vector<Ntk> add_node_recur( const Ntk& orig, const std::vector<part>& p, uint32_t ind, std::map<uint32_t, uint32_t>& max_allowed_of_fanin )
   {
-	if ( ind == p.size() )
-	{
-	  return { orig.copy_without_leaves() };
-	}
+    if ( ind == p.size() )
+    {
+      return { orig.copy_without_leaves() };
+    }
 
-	std::vector<Ntk> res;
+    std::vector<Ntk> res;
 
-	/* Decide what fanin gate to use for part in partition 'p' at index 'ind'. */
-	for ( auto&& fin : params.allowed_num_fanins )
-	{
-	  if ( max_allowed_of_fanin[fin] == 0 )
-	  {
-		continue;
-	  }
-	  max_allowed_of_fanin[fin]--;
+    /* Decide what fanin gate to use for part in partition 'p' at index 'ind'. */
+    for ( auto&& fin : params.allowed_num_fanins )
+    {
+      if ( max_allowed_of_fanin[fin] == 0 )
+      {
+        continue;
+      }
+      max_allowed_of_fanin[fin]--;
 
-	  auto temp = add_node_recur( orig, p, ind + 1, max_allowed_of_fanin );
+      auto temp = add_node_recur( orig, p, ind + 1, max_allowed_of_fanin );
 
-	  for ( auto&& t : temp )
-	  {
-		auto net = t.copy_with_last_layer_leaves();
-		net.add_internal_node( fin, p[ind], true );
-		res.push_back( net );
-	  }
+      for ( auto&& t : temp )
+      {
+        auto net = t.copy_with_last_layer_leaves();
+        net.add_internal_node( fin, p[ind], true );
+        res.push_back( net );
+      }
 
-	  max_allowed_of_fanin[fin]++;
-	}
+      max_allowed_of_fanin[fin]++;
+    }
 
-	return res;
+    return res;
   }
 
   /**
@@ -375,13 +375,13 @@ public:
    */
   Ntk get_next_dag( const Ntk& orig, const partition& p )
   {
-	assert( orig.is_partial_dag );
+    assert( orig.is_partial_dag );
 
-	auto net = orig.copy_without_leaves();
-	net.is_partial_dag = false;
-	std::for_each( p.begin(), p.end(), [&net]( auto q ) { net.add_leaf_node( q ); } );
+    auto net = orig.copy_without_leaves();
+    net.is_partial_dag = false;
+    std::for_each( p.begin(), p.end(), [&net]( auto q ) { net.add_leaf_node( q ); } );
 
-	return net;
+    return net;
   }
 
 private:
