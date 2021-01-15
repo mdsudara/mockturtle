@@ -1,9 +1,11 @@
 #include <catch.hpp>
 
+#include <optional>
 #include <set>
 
 #include <fmt/format.h>
 
+#include <mockturtle/algorithms/exact_syn/dag_cost.hpp>
 #include <mockturtle/algorithms/exact_syn/gen_dag.hpp>
 #include <mockturtle/algorithms/exact_syn/gen_dag_util.hpp>
 
@@ -207,7 +209,7 @@ TEST_CASE( "Layer extension from partial DAGs", "[aqfp_network_gen]" )
 
   auto params = mockturtle::dag_generator_params();
 
-  params.max_gates = 3u;         // allow at most 4 gates in total
+  params.max_gates = 3u;         // allow at most 3 gates in total
   params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
   params.max_width = 1000u;      // maximum number of gates at any level
   params.max_num_in = 5u;        // maximum number of inputs slots (need extra one for the constant)
@@ -250,10 +252,90 @@ TEST_CASE( "Layer extension from partial DAGs", "[aqfp_network_gen]" )
 
 TEST_CASE( "DAG generation from partial DAGs", "[aqfp_network_gen]" )
 {
-  //TODO
+  using Ntk = mockturtle::aqfp_logical_network_t<int>;
+
+  std::vector<uint32_t> allowed_num_fanins = { 3u, 5u };
+  std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 3u }, { 5u, 1u } };
+
+  auto params = mockturtle::dag_generator_params();
+
+  params.max_gates = 3u;         // allow at most 3 gates in total
+  params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
+  params.max_width = 1000u;      // maximum number of gates at any level
+  params.max_num_in = 3u;        // maximum number of inputs slots (need extra one for the constant)
+  params.max_levels = 3u;        // maximum number of gate levels in a DAG
+
+  params.allowed_num_fanins = allowed_num_fanins;
+  params.max_gates_of_fanin = max_gates_of_fanin;
+
+  auto dummy_cost_computer = []( const auto& net ) {(void)net; return 0.0; };
+
+  mockturtle::dag_generator<int, decltype( dummy_cost_computer )> gen( params, dummy_cost_computer );
+  Ntk pdag1 = { { 3, 3 }, { { 1 }, {} }, {}, 0, 0u, true, 2u, -1.0, { { 3u, 2u } }, { 1, 1, 1 }, { 0, 0 } };
+  Ntk pdag2 = { { 5 }, { {} }, {}, 0, 0, true, 1u, -1.0, { { 5u, 1u } }, { 0, 0, 0, 0, 0 }, {} };
+
+  auto t1 = gen.get_dags_from_partial_dag( pdag1 );
+
+  CHECK( t1.size() == 4u );
+  CHECK( t1.end() != std::find( t1.begin(), t1.end(),
+                                Ntk{ { 3, 3, 0, 0, 0 }, { { 1, 2, 3 }, { 2, 3, 4 }, {}, {}, {} }, { 2, 3, 4 }, 0, 0u, 0, 2u, -1, { { 3, 2 } }, {}, {} } ) );
+  CHECK( t1.end() != std::find( t1.begin(), t1.end(),
+                                Ntk{ { 3, 3, 0, 0, 0 }, { { 1, 2, 3 }, { 2, 3, 4 }, {}, {}, {} }, { 2, 3, 4 }, 2, 0u, 0, 2u, -1, { { 3, 2 } }, {}, {} } ) );
+  CHECK( t1.end() != std::find( t1.begin(), t1.end(),
+                                Ntk{ { 3, 3, 0, 0, 0 }, { { 1, 2, 3 }, { 2, 3, 4 }, {}, {}, {} }, { 2, 3, 4 }, 3, 0u, 0, 2u, -1, { { 3, 2 } }, {}, {} } ) );
+  CHECK( t1.end() != std::find( t1.begin(), t1.end(),
+                                Ntk{ { 3, 3, 0, 0, 0 }, { { 1, 2, 3 }, { 2, 3, 4 }, {}, {}, {} }, { 2, 3, 4 }, 4, 0u, 0, 2u, -1, { { 3, 2 } }, {}, {} } ) );
+
+  auto t2 = gen.get_dags_from_partial_dag( pdag2 );
+  CHECK( t2.size() == 4u );
+  CHECK( t2.end() != std::find( t2.begin(), t2.end(),
+                                Ntk{ { 5, 0, 0, 0 }, { { 1, 2, 2, 3, 3 }, {}, {}, {} }, { 1, 2, 3 }, 0, 0u, 0, 1u, -1, { { 5, 1 } }, {}, {} } ) );
+  CHECK( t2.end() != std::find( t2.begin(), t2.end(),
+                                Ntk{ { 5, 0, 0, 0 }, { { 1, 2, 2, 3, 3 }, {}, {}, {} }, { 1, 2, 3 }, 1, 0u, 0, 1u, -1, { { 5, 1 } }, {}, {} } ) );
+  CHECK( t2.end() != std::find( t2.begin(), t2.end(),
+                                Ntk{ { 5, 0, 0, 0 }, { { 1, 2, 2, 3, 3 }, {}, {}, {} }, { 1, 2, 3 }, 2, 0u, 0, 1u, -1, { { 5, 1 } }, {}, {} } ) );
+  CHECK( t2.end() != std::find( t2.begin(), t2.end(),
+                                Ntk{ { 5, 0, 0, 0 }, { { 1, 2, 2, 3, 3 }, {}, {}, {} }, { 1, 2, 3 }, 3, 0u, 0, 1u, -1, { { 5, 1 } }, {}, {} } ) );
 }
 
 TEST_CASE( "DAG generation with cost", "[aqfp_network_gen]" )
 {
-  //TODO
+  using Ntk = mockturtle::aqfp_logical_network_t<int>;
+
+  std::vector<uint32_t> allowed_num_fanins = { 3u, 5u };
+  std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 3u }, { 5u, 1u } };
+
+  auto params = mockturtle::dag_generator_params();
+
+  params.max_gates = 3u;         // allow at most 3 gates in total
+  params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
+  params.max_width = 1000u;      // maximum number of gates at any level
+  params.max_num_in = 3u;        // maximum number of inputs slots (need extra one for the constant)
+  params.max_levels = 3u;        // maximum number of gate levels in a DAG
+
+  params.allowed_num_fanins = allowed_num_fanins;
+  params.max_gates_of_fanin = max_gates_of_fanin;
+
+  mockturtle::aqfp_cost_computer<Ntk> aqfp_cc( { { 3u, 3.0 }, { 5u, 5.0 } }, { { 3u, 3.0 } }, 1.0, 3u );
+  mockturtle::dag_generator<int, decltype( aqfp_cc )> gen( params, aqfp_cc );
+
+  bool order_ok = true;
+  double prev_cost = 0.0;
+  uint32_t count_dag = 0u;
+
+  while ( true )
+  {
+    auto x = gen.next_dag();
+    if ( x == std::nullopt )
+      break;
+
+    auto curr_cost = aqfp_cc( x.value() );
+    if ( curr_cost < prev_cost )
+      order_ok = false;
+    prev_cost = curr_cost;
+    count_dag++;
+  }
+
+  CHECK( count_dag == 284u );
+  CHECK( order_ok );
 }

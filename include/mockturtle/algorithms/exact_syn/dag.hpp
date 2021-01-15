@@ -199,7 +199,8 @@ struct aqfp_logical_network_t
       }
     }
 
-    num_gates_of_fanin[num_fanin]++;
+    if ( num_fanin > 0u )
+      num_gates_of_fanin[num_fanin]++;
 
     return node_id;
   }
