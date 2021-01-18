@@ -13,44 +13,6 @@
 namespace mockturtle
 {
 
-namespace detail
-{
-
-/**
- *  For each num_var-input function, compute its npn-class, assign each npn-class a unique id from 0 to (num-npn-classe - 1).
- *  Save the corresponding mappings in tt_to_id and id_to_npn.
- */
-void compute_tt_to_npn_class_mapping( uint32_t num_vars, std::vector<uint32_t>& tt_to_id, std::vector<uint64_t>& id_to_npn )
-{
-  std::unordered_map<uint64_t, uint32_t> npn_to_id;
-
-  tt_to_id = std::vector<uint32_t>( ( 1ul << ( 1ul << num_vars ) ), 0u );
-
-  kitty::dynamic_truth_table dtt( num_vars );
-  do
-  {
-    auto npn = kitty::exact_npn_canonization( dtt );
-    auto npn_dtt = std::get<0>( npn );
-
-    if ( !npn_to_id.count( npn_dtt._bits[0] ) )
-    {
-      assert( npn_dtt == dtt );
-      npn_to_id[npn_dtt._bits[0]] = npn_to_id.size();
-    }
-    tt_to_id[dtt._bits[0]] = npn_to_id[npn_dtt._bits[0]];
-
-    kitty::next_inplace( dtt );
-  } while ( !kitty::is_const0( dtt ) );
-
-  id_to_npn = std::vector<uint64_t>( npn_to_id.size(), 0ul );
-  for ( auto it = npn_to_id.begin(); it != npn_to_id.end(); it++ )
-  {
-    id_to_npn[it->second] = it->first;
-  }
-}
-
-} // namespace detail
-
 /**
  * \brief Generates all DAGs matching the constraints in `params`.
  */
@@ -162,7 +124,7 @@ void simulate_all_dags( std::istream& is, std::ostream& os, uint32_t verbose = 0
         std::cerr << fmt::format( "processing dag {} [{}]\n", count, temp );
       }
 
-      mockturtle::aqfp_logical_network_t net;
+      mockturtle::aqfp_logical_network_t<int> net;
       net.decode_dag( temp );
 
       if ( net.zero_input == 0 && net.input_slots.size() > 4u )
