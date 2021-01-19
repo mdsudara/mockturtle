@@ -7,7 +7,9 @@
 #include <sstream>
 #include <thread>
 #include <vector>
+#include <fstream>
 
+#include <mockturtle/algorithms/exact_syn/aqfp_db.hpp>
 #include <mockturtle/algorithms/exact_syn/dag_cost.hpp>
 #include <mockturtle/algorithms/exact_syn/gen_dag.hpp>
 #include <mockturtle/algorithms/exact_syn/generate_db.hpp>
@@ -98,6 +100,80 @@ void test_sat_based_exact_syn()
   }
 }
 
+void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
+{
+  std::ifstream d( dpath );
+  std::ifstream c( cpath );
+
+  assert (d.is_open() && c.is_open());
+
+  std::string dag;
+  auto dag_count = 0u;
+
+  mockturtle::aqfp_logical_network_db<mockturtle::aqfp_logical_network_t<int>, 4u> db( 1u );
+
+  while ( std::getline( d, dag ) )
+  {
+    dag_count++;
+    auto ok = dag_count < 10 || dag_count % 1023 == 0u;
+
+    if ( ok )
+    {
+      std::string token;
+      c >> token;
+      std::unordered_map<uint64_t, double> configs;
+      while ( true )
+      {
+        double cst;
+        c >> token;
+        if ( token == "end" )
+        {
+          break;
+        }
+        c >> cst;
+        configs[std::stoul( token, 0, 16 )] = cst;
+      }
+
+      mockturtle::aqfp_logical_network_t<int> ntk;
+      ntk.decode_dag( dag );
+      if ( ntk.input_slots.size() < 5u || ( ntk.input_slots.size() == 5u && ntk.zero_input != 0 ) )
+      {
+        db.update( ntk, configs );
+      }
+    }
+    else
+    {
+      std::string token;
+      c >> token;
+      while ( true )
+      {
+        c >> token;
+        if ( token == "end" )
+        {
+          break;
+        }
+        c >> token;
+      }
+    }
+
+    if ( dag_count % 100000 == 0u )
+    {
+      std::cerr << fmt::format( "count = {}\n", dag_count );
+    }
+
+    if ( dag_count == 10000000 )
+    {
+      break;
+    }
+  }
+  d.close();
+  c.close();
+
+  std::ofstream o( opath);
+  db.save_db_to_file( o );
+  o.close();
+}
+
 int main( int argc, char** argv )
 {
   (void)argc;
@@ -125,6 +201,16 @@ int main( int argc, char** argv )
   else if ( cmd == "ts" )
   {
     test_sat_based_exact_syn();
+  }
+  else if ( cmd == "ad" )
+  {
+    assert(argc == 5);
+
+    std::string dpath(argv[2]);
+    std::string cpath(argv[3]);
+    std::string opath(argv[4]);
+
+    generate_aqfp_db(dpath, cpath, opath);
   }
   else
   {
