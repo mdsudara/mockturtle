@@ -14,14 +14,15 @@ namespace mockturtle
 {
 
 /**
- * \brief Generates all DAGs matching the constraints in `params`.
+ * \brief Generates all DAGs matching the constraints in `params`. If `count_only` is set, only the final DAG count will be printed.
  */
-void generate_all_dags( const mockturtle::dag_generator_params& params, std::ostream& os, uint32_t verbose = 0u )
+void generate_all_dags( const mockturtle::dag_generator_params& params, std::ostream& os, bool count_only = false, uint32_t verbose = 0u )
 {
   auto gen = mockturtle::dag_generator<int, std::function<double( aqfp_logical_network_t<int>& )>>( params, []( aqfp_logical_network_t<int>& net ) { (void) net; return 0.0; } );
 
   auto t0 = std::chrono::high_resolution_clock::now();
-  auto count = 0u;
+  uint64_t count = 0u;
+  std::vector<uint64_t> counts_inp(6);
   while ( true )
   {
     auto result_opt = gen.next_dag( []( auto& net ) {(void) net; return true; } );
@@ -36,16 +37,24 @@ void generate_all_dags( const mockturtle::dag_generator_params& params, std::ost
       break;
     }
     auto result = result_opt.value();
+    if ( !count_only )
+    {
+      os << fmt::format( "{}\n", result.encode_as_string() );
+    }
+    count++;
+    counts_inp[result.input_slots.size()] ++;
 
-    os << fmt::format( "{}\n", result.encode_as_string() );
-
-    if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
+    if ( verbose > 5u || ( verbose > 0 && count % 1000 == 0 ) )
     {
       auto t1 = std::chrono::high_resolution_clock::now();
       auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
       std::cerr << fmt::format( "Number of DAGs generated {:8d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
     }
   }
+  auto t2 = std::chrono::high_resolution_clock::now();
+  auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>( t2 - t0 );
+  std::cout << fmt::format( "Number of DAGs generated {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
+  std::cout << fmt::format( "Number of DAGs of different input counts: [{}]\n", fmt::join(counts_inp, " "));
 }
 
 /**

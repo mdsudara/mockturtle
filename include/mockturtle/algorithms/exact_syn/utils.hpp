@@ -65,7 +65,7 @@ public:
     for ( auto& x : key )
     {
       seed ^= x.size() + 0x9e3779b9 + ( seed << 6 ) + ( seed >> 2 );
-      for ( auto& y : key )
+      for ( auto& y : x )
       {
         seed ^= ha( y ) + 0x9e3779b9 + ( seed << 6 ) + ( seed >> 2 );
       }

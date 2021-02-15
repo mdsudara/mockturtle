@@ -50,7 +50,7 @@ class partition_generator
 
 public:
   /**
-   * \brief Computes and returns a vector of partitions for a given list of elements
+   * \brief Computes and returns a set of partitions for a given list of elements
    * such that no part contains any element 'e' more than 'max_counts[e]' times.
    */
   partition_set operator()(

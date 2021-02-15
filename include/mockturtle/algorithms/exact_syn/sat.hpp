@@ -13,8 +13,8 @@
 namespace mockturtle
 {
 
-using mig_node = std::pair<uint64_t, std::vector<uint32_t>>;
-using mig_chain = std::vector<mig_node>;
+using mig_node2 = std::pair<uint64_t, std::vector<uint32_t>>;
+using mig_chain = std::vector<mig_node2>;
 
 uint64_t input_tt[] = {
     0x0000000000000000L,

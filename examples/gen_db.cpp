@@ -1,5 +1,6 @@
 #include <chrono>
 #include <fmt/format.h>
+#include <fstream>
 #include <future>
 #include <iostream>
 #include <mutex>
@@ -7,7 +8,6 @@
 #include <sstream>
 #include <thread>
 #include <vector>
-#include <fstream>
 
 #include <mockturtle/algorithms/exact_syn/aqfp_db.hpp>
 #include <mockturtle/algorithms/exact_syn/dag_cost.hpp>
@@ -15,29 +15,29 @@
 #include <mockturtle/algorithms/exact_syn/generate_db.hpp>
 #include <mockturtle/algorithms/exact_syn/sat.hpp>
 
-void generate_dag_db()
+void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, const std::map<uint32_t, uint32_t>& max_gates_of_fanin = { { 3u, 7u } }, uint32_t max_gates = 7u, uint32_t max_num_in = 5u, uint32_t max_levels = 7u, bool count_only = false)
 {
-  std::vector<uint32_t> allowed_num_fanins = { 3u };                // will use only fanin 3 gates
-  std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 7u } }; // allow at most 7 3-input gates and 0 5-input gates
+  // std::vector<uint32_t> allowed_num_fanins = { 3u };                // will use only fanin 3 gates
+  // std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 7u } }; // allow at most 7 3-input gates and 0 5-input gates
 
   auto params = mockturtle::dag_generator_params();
 
-  params.max_gates = 7u;         // allow at most 7 gates in total
-  params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
-  params.max_width = 1000u;      // maximum number of gates at any level
-  params.max_num_in = 5u;        // maximum number of inputs slots (need extra one for the constant)
-  params.max_levels = 7u;        // maximum number of gate levels in a DAG
+  params.max_gates = max_gates;   // allow at most 7 gates in total
+  params.max_num_fanout = 1000u;  // limit the maximum fanout of a gate
+  params.max_width = 1000u;       // maximum number of gates at any level
+  params.max_num_in = max_num_in; // maximum number of inputs slots (need extra one for the constant)
+  params.max_levels = max_levels; // maximum number of gate levels in a DAG
 
   params.allowed_num_fanins = allowed_num_fanins;
   params.max_gates_of_fanin = max_gates_of_fanin;
 
-  mockturtle::generate_all_dags( params, std::cout, 1u );
+  mockturtle::generate_all_dags( params, std::cout, count_only, 1u );
 }
 
 void generate_cost_db()
 {
   using Ntk = mockturtle::aqfp_logical_network_t<int>;
-  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 3.0 } }, { { 3u, 3.0 } }, 1.0, 4u );
+  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 6.0 } }, { { 4u, 2.0 } }, 2.0, 4u );
   mockturtle::cost_all_dags( std::cin, std::cout, cc, 1u );
 }
 
@@ -105,17 +105,19 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
   std::ifstream d( dpath );
   std::ifstream c( cpath );
 
-  assert (d.is_open() && c.is_open());
+  assert( d.is_open() && c.is_open() );
 
   std::string dag;
   auto dag_count = 0u;
 
-  mockturtle::aqfp_logical_network_db<mockturtle::aqfp_logical_network_t<int>, 4u> db( 1u );
+  mockturtle::aqfp_logical_network_db<mockturtle::aqfp_logical_network_t<int>, 4u> db( 2.0, 1u );
 
   while ( std::getline( d, dag ) )
   {
     dag_count++;
-    auto ok = dag_count < 10 || dag_count % 1023 == 0u;
+
+    // auto ok = dag_count < 10 || dag_count % 1023 == 0u; // skip many DAGs to speed-up the process
+    auto ok = true; // process all DAGs
 
     if ( ok )
     {
@@ -156,9 +158,16 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
       }
     }
 
-    if ( dag_count % 100000 == 0u )
+    if ( dag_count % 10000 == 0u )
     {
       std::cerr << fmt::format( "count = {}\n", dag_count );
+
+      if ( dag_count % 100000 == 0 )
+      {
+        std::ofstream op( opath );
+        db.save_db_to_file( op );
+        op.close();
+      }
     }
 
     if ( dag_count == 10000000 )
@@ -166,12 +175,33 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
       break;
     }
   }
+
   d.close();
   c.close();
 
-  std::ofstream o( opath);
+  std::ofstream o( opath );
   db.save_db_to_file( o );
   o.close();
+}
+
+std::vector<uint32_t> string_to_uint_vec(std::string str) {
+  std::stringstream ss(str);
+  std::vector<uint32_t> res;
+  uint32_t temp;
+  while(ss >> temp) {
+    res.push_back(temp);
+  }
+  return res;
+}
+
+std::map<uint32_t, uint32_t> string_to_uint_uint_map(std::string str) {
+  std::stringstream ss(str);
+  std::map<uint32_t, uint32_t> res;
+  uint32_t t1, t2;
+  while(ss >> t1 >> t2) {
+    res[t1] = t2;
+  }
+  return res;
 }
 
 int main( int argc, char** argv )
@@ -181,14 +211,24 @@ int main( int argc, char** argv )
 
   if ( argc < 2 )
   {
-    std::cerr << fmt::format( "Not enough arguments.\n" );
+    std::cerr << fmt::format( "Not enough arguments. Usage: {} cmd [opt]\n", std::string(argv[0]) );
     return 0;
   }
 
   std::string cmd( argv[1] );
   if ( cmd == "gd" )
   {
-    generate_dag_db();
+    if (argc < 3) {
+      generate_dag_db();
+    } else {
+      auto allowed_num_fanins = string_to_uint_vec(std::string(argv[2]));
+      auto max_gates_of_fanin = string_to_uint_uint_map(std::string(argv[3]));
+      auto max_gates = std::stoul(std::string(argv[4]));
+      auto max_num_in = std::stoul(std::string(argv[5]));
+      auto max_levels = std::stoul(std::string(argv[6]));
+      generate_dag_db(allowed_num_fanins, max_gates_of_fanin, max_gates, max_num_in, max_levels, true);
+    }
+
   }
   else if ( cmd == "cd" )
   {
@@ -198,19 +238,19 @@ int main( int argc, char** argv )
   {
     generate_dag_npn_db();
   }
+  else if ( cmd == "ad" )
+  {
+    assert( argc == 5 );
+
+    std::string dpath( argv[2] );
+    std::string cpath( argv[3] );
+    std::string opath( argv[4] );
+
+    generate_aqfp_db( dpath, cpath, opath );
+  }
   else if ( cmd == "ts" )
   {
     test_sat_based_exact_syn();
-  }
-  else if ( cmd == "ad" )
-  {
-    assert(argc == 5);
-
-    std::string dpath(argv[2]);
-    std::string cpath(argv[3]);
-    std::string opath(argv[4]);
-
-    generate_aqfp_db(dpath, cpath, opath);
   }
   else
   {
@@ -218,6 +258,7 @@ int main( int argc, char** argv )
                               "\tgd -- for generating DAGs\n"
                               "\tcd -- for costing DAGs\n"
                               "\tsd -- for simulating DAGs\n"
+                              "\tad -- for generating the AQFP database\n"
                               "\tts -- for testing SAT-based exact synthesis\n",
                               cmd );
   }

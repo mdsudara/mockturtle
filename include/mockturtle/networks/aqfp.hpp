@@ -1,8 +1,33 @@
+/* mockturtle: C++ logic network library
+ * Copyright (C) 2018-2019  EPFL
+ *
+ * Permission is hereby granted, free of charge, to any person
+ * obtaining a copy of this software and associated documentation
+ * files (the "Software"), to deal in the Software without
+ * restriction, including without limitation the rights to use,
+ * copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the
+ * Software is furnished to do so, subject to the following
+ * conditions:
+ *
+ * The above copyright notice and this permission notice shall be
+ * included in all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+ * EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES
+ * OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+ * NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT
+ * HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
+ * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+ * FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR
+ * OTHER DEALINGS IN THE SOFTWARE.
+ */
+
 /*!
   \file aqfp_net.hpp
   \brief AQFP network implementation
 
-  \author Dewmini Marakkalage 
+  \author Dewmini Sudara 
 */
 
 #pragma once
@@ -32,7 +57,7 @@ struct aqfp_storage_data
   uint32_t trav_id = 0u;
 };
 
-/*! \brief AQFP storage container
+/*! \brief AQFP network storage container
 
   MIGs have nodes with fan-in 3.  We split of one bit of the index pointer to
   store a complemented attribute.  Every node has 64-bit of additional data
@@ -41,20 +66,29 @@ struct aqfp_storage_data
   `data[0].h1`: Fan-out size (we use MSB to indicate whether a node is dead)
   `data[0].h2`: Application-specific value
   `data[1].h1`: Visited flag
+  `data[1].h2`: Node type 0 for majority gate, n for fanout-n splitters (1 == buffer)
+  `data[2]    : Node ID
 */
 
-using aqfp_node = regular_node<3, 2, 1>;
+struct aqfp_node : regular_node<3, 3, 1>
+{
+  bool operator==( aqfp_node const& other ) const
+  {
+    return ( data[2].n == other.data[2].n ) && ( data[1].h2 == other.data[1].h2 ) && ( children == other.children );
+  }
+};
+
 using aqfp_storage = storage<aqfp_node, aqfp_storage_data>;
 
-class mig_network
+class aqfp_network
 {
 public:
 #pragma region Types and constructors
   static constexpr auto min_fanin_size = 3u;
   static constexpr auto max_fanin_size = 3u;
 
-  using base_type = mig_network;
-  using storage = std::shared_ptr<mig_storage>;
+  using base_type = aqfp_network;
+  using storage = std::shared_ptr<aqfp_storage>;
   using node = uint64_t;
 
   struct signal
@@ -71,12 +105,13 @@ public:
     {
     }
 
-    signal( mig_storage::node_type::pointer_type const& p )
+    signal( aqfp_storage::node_type::pointer_type const& p )
         : complement( p.weight ), index( p.index )
     {
     }
 
-    union {
+    union
+    {
       struct
       {
         uint64_t complement : 1;
@@ -92,12 +127,12 @@ public:
 
     signal operator+() const
     {
-      return {index, 0};
+      return { index, 0 };
     }
 
     signal operator-() const
     {
-      return {index, 1};
+      return { index, 1 };
     }
 
     signal operator^( bool complement ) const
@@ -120,19 +155,19 @@ public:
       return data < other.data;
     }
 
-    operator mig_storage::node_type::pointer_type() const
+    operator aqfp_storage::node_type::pointer_type() const
     {
-      return {index, complement};
+      return { index, complement };
     }
   };
 
-  mig_network()
-      : _storage( std::make_shared<mig_storage>() ),
+  aqfp_network()
+      : _storage( std::make_shared<aqfp_storage>() ),
         _events( std::make_shared<decltype( _events )::element_type>() )
   {
   }
 
-  mig_network( std::shared_ptr<mig_storage> storage )
+  aqfp_network( std::shared_ptr<aqfp_storage> storage )
       : _storage( storage ),
         _events( std::make_shared<decltype( _events )::element_type>() )
   {
@@ -142,7 +177,7 @@ public:
 #pragma region Primary I / O and constants
   signal get_constant( bool value ) const
   {
-    return {0, static_cast<uint64_t>( value ? 1 : 0 )};
+    return { 0, static_cast<uint64_t>( value ? 1 : 0 ) };
   }
 
   signal create_pi( std::string const& name = std::string() )
@@ -154,7 +189,7 @@ public:
     node.children[0].data = node.children[1].data = node.children[2].data = ~static_cast<uint64_t>( 0 );
     _storage->inputs.emplace_back( index );
     ++_storage->data.num_pis;
-    return {index, 0};
+    return { index, 0 };
   }
 
   uint32_t create_po( signal const& f, std::string const& name = std::string() )
@@ -177,7 +212,7 @@ public:
     auto& node = _storage->nodes.emplace_back();
     node.children[0].data = node.children[1].data = node.children[2].data = _storage->inputs.size();
     _storage->inputs.emplace_back( index );
-    return {index, 0};
+    return { index, 0 };
   }
 
   uint32_t create_ri( signal const& f, int8_t reset = 0, std::string const& name = std::string() )
@@ -290,24 +325,26 @@ public:
     node.children[1] = b;
     node.children[2] = c;
 
-    /* structural hashing */
-    const auto it = _storage->hash.find( node );
-    if ( it != _storage->hash.end() )
-    {
-      return {it->second, node_complement};
-    }
+    /* NO structural hashing */
+    /* Allow duplicate nodes to be created */
+
+    // const auto it = _storage->hash.find( node );
+    // if ( it != _storage->hash.end() )
+    // {
+    //   return {it->second, node_complement};
+    // }
 
     const auto index = _storage->nodes.size();
 
     if ( index >= .9 * _storage->nodes.capacity() )
     {
       _storage->nodes.reserve( static_cast<uint64_t>( 3.1415f * index ) );
-      _storage->hash.reserve( static_cast<uint64_t>( 3.1415f * index ) );
+      // _storage->hash.reserve( static_cast<uint64_t>( 3.1415f * index ) );
     }
 
     _storage->nodes.push_back( node );
 
-    _storage->hash[node] = index;
+    // _storage->hash[node] = index;
 
     /* increase ref-count to children */
     _storage->nodes[a.index].data[0].h1++;
@@ -319,7 +356,7 @@ public:
       fn( index );
     }
 
-    return {index, node_complement};
+    return { index, node_complement };
   }
 
   signal create_and( signal const& a, signal const& b )
@@ -362,7 +399,7 @@ public:
 
   signal create_ite( signal cond, signal f_then, signal f_else )
   {
-    bool f_compl{false};
+    bool f_compl{ false };
     if ( f_then.index < f_else.index )
     {
       std::swap( f_then, f_else );
@@ -404,7 +441,7 @@ public:
 #pragma endregion
 
 #pragma region Create arbitrary functions
-  signal clone_node( mig_network const& other, node const& source, std::vector<signal> const& children )
+  signal clone_node( aqfp_network const& other, node const& source, std::vector<signal> const& children )
   {
     (void)other;
     (void)source;
@@ -468,35 +505,35 @@ public:
     }
 
     // node already in hash table
-    storage::element_type::node_type _hash_obj;
-    _hash_obj.children[0] = child0;
-    _hash_obj.children[1] = child1;
-    _hash_obj.children[2] = child2;
-    if ( const auto it = _storage->hash.find( _hash_obj ); it != _storage->hash.end() )
-    {
-      return std::make_pair( n, signal( it->second, 0 ) );
-    }
+    // storage::element_type::node_type _hash_obj;
+    // _hash_obj.children[0] = child0;
+    // _hash_obj.children[1] = child1;
+    // _hash_obj.children[2] = child2;
+    // if ( const auto it = _storage->hash.find( _hash_obj ); it != _storage->hash.end() )
+    // {
+    //   return std::make_pair( n, signal( it->second, 0 ) );
+    // }
 
     // remember before
-    const auto old_child0 = signal{node.children[0]};
-    const auto old_child1 = signal{node.children[1]};
-    const auto old_child2 = signal{node.children[2]};
+    const auto old_child0 = signal{ node.children[0] };
+    const auto old_child1 = signal{ node.children[1] };
+    const auto old_child2 = signal{ node.children[2] };
 
     // erase old node in hash table
-    _storage->hash.erase( node );
+    // _storage->hash.erase( node );
 
     // insert updated node into hash table
     node.children[0] = child0;
     node.children[1] = child1;
     node.children[2] = child2;
-    _storage->hash[node] = n;
+    // _storage->hash[node] = n;
 
     // update the reference counter of the new signal
     _storage->nodes[new_signal.index].data[0].h1++;
 
     for ( auto const& fn : _events->on_modified )
     {
-      fn( n, {old_child0, old_child1, old_child2} );
+      fn( n, { old_child0, old_child1, old_child2 } );
     }
 
     return std::nullopt;
@@ -525,7 +562,7 @@ public:
 
     auto& nobj = _storage->nodes[n];
     nobj.data[0].h1 = UINT32_C( 0x80000000 ); /* fanout size 0, but dead */
-    _storage->hash.erase( nobj );
+    // _storage->hash.erase( nobj );
 
     for ( auto const& fn : _events->on_delete )
     {
@@ -553,7 +590,7 @@ public:
   void substitute_node( node const& old_node, signal const& new_signal )
   {
     std::stack<std::pair<node, signal>> to_substitute;
-    to_substitute.push( {old_node, new_signal} );
+    to_substitute.push( { old_node, new_signal } );
 
     while ( !to_substitute.empty() )
     {
@@ -636,7 +673,7 @@ public:
 
   uint32_t num_latches() const
   {
-      return static_cast<uint32_t>( _storage->data.latches.size() );
+    return static_cast<uint32_t>( _storage->data.latches.size() );
   }
 
   auto num_pis() const
@@ -657,13 +694,20 @@ public:
 
   auto num_gates() const
   {
-    return static_cast<uint32_t>( _storage->hash.size() );
+    // TODO: check if this is correct
+    return static_cast<uint32_t>( _storage->nodes.size() - 1u );
   }
 
   uint32_t fanin_size( node const& n ) const
   {
-    if ( is_constant( n ) || is_ci( n ) )
+    if ( is_constant( n ) || is_ci( n ) ) {
       return 0;
+    }
+
+    if (is_buffer_or_splitter(n)) {
+      return 1;
+    }
+
     return 3;
   }
 
@@ -702,7 +746,8 @@ public:
 
   bool is_maj( node const& n ) const
   {
-    return n > 0 && !is_ci( n );
+    // TODO: check if this is correct
+    return n > 0 && !is_ci( n ) && ( _storage->nodes[n].data[1].h2 == 0u );
   }
 
   bool is_ite( node const& n ) const
@@ -734,15 +779,31 @@ public:
     (void)n;
     return false;
   }
+
+  bool is_buffer_or_splitter( node const& n ) const
+  {
+    return n > 0 && !is_ci( n ) && ( _storage->nodes[n].data[1].h2 > 0u );
+  }
+
 #pragma endregion
 
 #pragma region Functional properties
   kitty::dynamic_truth_table node_function( const node& n ) const
   {
-    (void)n;
-    kitty::dynamic_truth_table _maj( 3 );
-    _maj._bits[0] = 0xe8;
-    return _maj;
+    if ( is_buffer_or_splitter(n) ) {
+      kitty::dynamic_truth_table _buf( 1 );
+      _buf._bits[0] = 0x02;
+      return _buf;
+    }
+
+    if ( is_maj( n ) )
+    {
+      kitty::dynamic_truth_table _maj( 3 );
+      _maj._bits[0] = 0xe8;
+      return _maj;
+    }
+
+    return kitty::dynamic_truth_table( 0 );
   }
 #pragma endregion
 
@@ -831,8 +892,8 @@ public:
 
   uint32_t pi_index( node const& n ) const
   {
-    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && 
-            _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data);
+    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data &&
+            _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data );
     assert( _storage->nodes[n].children[0].data < _storage->data.num_pis );
 
     return static_cast<uint32_t>( _storage->nodes[n].children[0].data );
@@ -854,7 +915,7 @@ public:
 
   uint32_t ro_index( node const& n ) const
   {
-    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && 
+    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data &&
             _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data );
     assert( _storage->nodes[n].children[0].data >= _storage->data.num_pis );
 
@@ -954,7 +1015,7 @@ public:
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, std::pair<signal, node>, bool> )
     {
-      uint32_t index{0};
+      uint32_t index{ 0 };
       while ( ro != _storage->inputs.end() && ri != _storage->outputs.end() )
       {
         if ( !fn( std::make_pair( ri++, ro++ ), index++ ) )
@@ -970,7 +1031,7 @@ public:
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, std::pair<signal, node>, void> )
     {
-      uint32_t index{0};
+      uint32_t index{ 0 };
       while ( ro != _storage->inputs.end() && ri != _storage->outputs.end() )
       {
         fn( std::make_pair( *ri++, *ro++ ), index++ );
@@ -1002,31 +1063,31 @@ public:
     // we don't use foreach_element here to have better performance
     if constexpr ( detail::is_callable_without_index_v<Fn, signal, bool> )
     {
-      if ( !fn( signal{_storage->nodes[n].children[0]} ) )
+      if ( !fn( signal{ _storage->nodes[n].children[0] } ) )
         return;
-      if ( !fn( signal{_storage->nodes[n].children[1]} ) )
+      if ( !fn( signal{ _storage->nodes[n].children[1] } ) )
         return;
-      fn( signal{_storage->nodes[n].children[2]} );
+      fn( signal{ _storage->nodes[n].children[2] } );
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, signal, bool> )
     {
-      if ( !fn( signal{_storage->nodes[n].children[0]}, 0 ) )
+      if ( !fn( signal{ _storage->nodes[n].children[0] }, 0 ) )
         return;
-      if ( !fn( signal{_storage->nodes[n].children[1]}, 1 ) )
+      if ( !fn( signal{ _storage->nodes[n].children[1] }, 1 ) )
         return;
-      fn( signal{_storage->nodes[n].children[2]}, 2 );
+      fn( signal{ _storage->nodes[n].children[2] }, 2 );
     }
     else if constexpr ( detail::is_callable_without_index_v<Fn, signal, void> )
     {
-      fn( signal{_storage->nodes[n].children[0]} );
-      fn( signal{_storage->nodes[n].children[1]} );
-      fn( signal{_storage->nodes[n].children[2]} );
+      fn( signal{ _storage->nodes[n].children[0] } );
+      fn( signal{ _storage->nodes[n].children[1] } );
+      fn( signal{ _storage->nodes[n].children[2] } );
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, signal, void> )
     {
-      fn( signal{_storage->nodes[n].children[0]}, 0 );
-      fn( signal{_storage->nodes[n].children[1]}, 1 );
-      fn( signal{_storage->nodes[n].children[2]}, 2 );
+      fn( signal{ _storage->nodes[n].children[0] }, 0 );
+      fn( signal{ _storage->nodes[n].children[1] }, 1 );
+      fn( signal{ _storage->nodes[n].children[2] }, 2 );
     }
   }
 #pragma endregion
@@ -1041,10 +1102,15 @@ public:
     assert( n != 0 && !is_ci( n ) );
 
     auto const& c1 = _storage->nodes[n].children[0];
+    auto v1 = *begin++;
+
+    if (is_buffer_or_splitter(n)) {
+      return v1 ^ c1.weight;
+    }
+
     auto const& c2 = _storage->nodes[n].children[1];
     auto const& c3 = _storage->nodes[n].children[2];
 
-    auto v1 = *begin++;
     auto v2 = *begin++;
     auto v3 = *begin++;
 
@@ -1060,10 +1126,17 @@ public:
     assert( n != 0 && !is_ci( n ) );
 
     auto const& c1 = _storage->nodes[n].children[0];
+    auto tt1 = *begin++;
+
+    if (is_buffer_or_splitter(n)) {
+      return c1.weight ? ~tt1 : tt1 ;
+    }
+
+    // majority gate
+
     auto const& c2 = _storage->nodes[n].children[1];
     auto const& c3 = _storage->nodes[n].children[2];
 
-    auto tt1 = *begin++;
     auto tt2 = *begin++;
     auto tt3 = *begin++;
 
@@ -1080,10 +1153,19 @@ public:
     assert( n != 0 && !is_ci( n ) );
 
     auto const& c1 = _storage->nodes[n].children[0];
+    auto tt1 = *begin++;
+
+    if (is_buffer_or_splitter(n)) {
+      result.resize( tt1.num_bits() );
+      result._bits.back() = c1.weight ? ~tt1._bits.back() : tt1._bits.back();
+      return;
+    }
+
+    // majority gate
+
     auto const& c2 = _storage->nodes[n].children[1];
     auto const& c3 = _storage->nodes[n].children[2];
 
-    auto tt1 = *begin++;
     auto tt2 = *begin++;
     auto tt3 = *begin++;
 
@@ -1095,9 +1177,9 @@ public:
 
     result.resize( tt1.num_bits() );
     result._bits.back() =
-      ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) ) |
-      ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) ) |
-      ( ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) );
+        ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) ) |
+        ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) ) |
+        ( ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) );
     result.mask_bits();
   }
 #pragma endregion
@@ -1164,7 +1246,7 @@ public:
 #pragma endregion
 
 public:
-  std::shared_ptr<mig_storage> _storage;
+  std::shared_ptr<aqfp_storage> _storage;
   std::shared_ptr<network_events<base_type>> _events;
 };
 
@@ -1174,9 +1256,9 @@ namespace std
 {
 
 template<>
-struct hash<mockturtle::mig_network::signal>
+struct hash<mockturtle::aqfp_network::signal>
 {
-  uint64_t operator()( mockturtle::mig_network::signal const& s ) const noexcept
+  uint64_t operator()( mockturtle::aqfp_network::signal const& s ) const noexcept
   {
     uint64_t k = s.data;
     k ^= k >> 33;

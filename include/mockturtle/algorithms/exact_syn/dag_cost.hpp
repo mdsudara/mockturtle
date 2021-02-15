@@ -119,6 +119,44 @@ public:
     return ( orig_net.computed_cost = cost );
   }
 
+
+  std::tuple<double, std::vector<uint32_t>> aqfp_cost_with_fixed_input_levels( Ntk& orig_net, const std::vector<uint32_t>& input_levels, const std::vector<bool>& const_or_pi )
+  {
+    (void) const_or_pi;
+    cost_context ctx( orig_net );
+
+    compute_fanouts( ctx.net, ctx.fanout );
+    compute_min_levels( ctx.net, ctx.fanout, ctx.minlev );
+    compute_max_levels( ctx.net, ctx.fanout, ctx.maxlev, input_levels );
+
+    uint32_t ind = 0u;
+    // for (auto x : ctx.net.input_slots) {
+    //   if (x == ctx.net.zero_input) continue; 
+    //   if (const_or_pi[ind++]) {
+    //     ctx.fanout[x].clear();
+    //   }
+    // }
+
+    // fix levels for the root and the inputs
+    ctx.maxlev[0] = 0;
+    ind = 0u;
+    for ( auto f : ctx.net.input_slots )
+    {
+        if ( f != ctx.net.zero_input )
+        {
+          ctx.minlev[f] = input_levels[ind++];
+        }
+    }
+
+    // check different level configurations for the other gates and compute the cost for buffers and splitters
+    auto [cost, levels] = compute_best_cost_and_levels( ctx, 1u, 0.0);
+
+    // add the gate costs
+    cost += simp_cc( ctx.net );
+
+    return {cost, levels};
+  }
+
   /**
    * Computes the AQFP cost for a network and save it if it is not computed before. Then returns
    * the computed cost. Cost is computed by considering different ways of fixing levels of the gates
@@ -310,6 +348,41 @@ private:
     }
   }
 
+  template<typename FanOutT, typename MaxLevT>
+  void compute_max_levels( const Ntk& net, const FanOutT& fanout, MaxLevT& maxlev, std::vector<uint32_t> input_levels )
+  {
+    uint32_t ind = 0u;
+    for ( auto& f : net.input_slots )
+    {
+      if ( f != net.zero_input )
+      {
+        maxlev[f] = input_levels[ind++];
+      }
+      else
+      {
+        maxlev[f] = std::numeric_limits<uint32_t>::max();
+      }
+    }
+
+    for ( auto i = net.num_gates(); i > 0u; i-- )
+    {
+      maxlev[i - 1] = std::numeric_limits<uint32_t>::max();
+      for ( auto f : net.nodes[i - 1] )
+      {
+        auto t = maxlev[f] - 1;
+        if ( fanout[f].size() > 1 )
+        {
+          t--;
+        }
+        if ( t < maxlev[i - 1] )
+        {
+          maxlev[i - 1] = t;
+        }
+      }
+    }
+  }
+
+
   /**
    * \brief Compute the best splitter and buffer cost for a given relative level configuration 'config'.
    */
@@ -411,7 +484,7 @@ private:
 
       for ( auto f : ctx.net.input_slots )
       {
-        if ( f == ctx.net.zero_input )
+        if ( (f == ctx.net.zero_input) || ctx.fanout[f].empty())
         {
           continue;
         }
@@ -446,6 +519,54 @@ private:
     return result;
   }
 
+
+  /**
+   * \brief Similar to compute_best_cost, but also return the corresponding levels that achieve the minimum cost.
+   */
+  std::tuple<double, std::vector<uint32_t>> compute_best_cost_and_levels( cost_context& ctx, uint32_t current_gid, double cost_so_far )
+  {
+    if ( ctx.net.num_gates() == current_gid )
+    {
+      for ( auto f : ctx.net.input_slots )
+      {
+        if ( (f == ctx.net.zero_input) || ctx.fanout[f].empty())
+        {
+          continue;
+        }
+
+        ctx.curlev[f] = ctx.maxlev[f];
+        cost_so_far += cost_for_node_if_in_level( ctx, ctx.maxlev[f], ctx.fanout[f] );
+
+        if ( cost_so_far >= IMPOSSIBLE )
+        {
+          return {IMPOSSIBLE, {}};
+        }
+      }
+
+      return {cost_so_far, ctx.curlev};
+    }
+
+    double res_cost = IMPOSSIBLE;
+    std::vector<uint32_t> res_lev = {};
+    for ( auto lev = ctx.minlev[current_gid]; lev <= ctx.maxlev[current_gid]; lev++ )
+    {
+      auto cost = cost_for_node_if_in_level( ctx, lev, ctx.fanout[current_gid] );
+      if ( cost >= IMPOSSIBLE )
+      {
+        continue;
+      }
+      ctx.curlev[current_gid] = lev;
+      auto [temp_cost, temp_lev] = compute_best_cost_and_levels( ctx, current_gid + 1, cost_so_far + cost );
+      if ( temp_cost < res_cost )
+      {
+        res_cost = temp_cost;
+        res_lev = temp_lev;
+      }
+    }
+
+    return {res_cost, res_lev};
+  }
+
   /**
    * \brief Compute costs considering all input level configurations. Works for at most 8 inputs and at most 255 levels.
    */
@@ -454,6 +575,7 @@ private:
     if ( ctx.net.nodes.size() == current_gid )
     {
       level_config_t lconfig = 0u;
+      uint32_t ind = 0;
       for ( auto f : ctx.net.input_slots )
       {
         if ( f == ctx.net.zero_input )
@@ -461,7 +583,9 @@ private:
           continue;
         }
 
-        lconfig = ( lconfig << 8 ) + ctx.curlev[f];
+        // lconfig = ( lconfig << 8 ) + ctx.curlev[f];
+        lconfig |= (ctx.curlev[f] << (8 * ind));
+        ind++;
       }
 
       if ( !config_cost.count( lconfig ) )
