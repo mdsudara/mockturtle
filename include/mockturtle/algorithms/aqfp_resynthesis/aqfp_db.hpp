@@ -10,11 +10,6 @@
 #include "./dag.hpp"
 #include "./dag_cost.hpp"
 
-/**
- *  TODO: [ ] For all real-primary-input configurations, keep entries in the database.
- *  TODO: [ ] Return levels of the gates together with the network so that we can build the real depth view.
- *  TODO: [ ] Return the correct inverter configuration so that we can construct the correct majority circuit. 
- */
 namespace mockturtle
 {
 template<uint32_t N = 4u>
@@ -192,10 +187,6 @@ public:
       {
         auto& lvl_cfg = it->first;
         auto& cost = it->second;
-        // std::vector<uint8_t> new_levels = { level_of_input( lvl_cfg, revperm[0] ),
-        //                                     level_of_input( lvl_cfg, revperm[1] ),
-        //                                     level_of_input( lvl_cfg, revperm[2] ),
-        //                                     level_of_input( lvl_cfg, revperm[3] ) };
         std::vector<uint8_t> new_levels = { level_of_input( lvl_cfg, npnperm[0] ),
                                             level_of_input( lvl_cfg, npnperm[1] ),
                                             level_of_input( lvl_cfg, npnperm[2] ),
@@ -232,26 +223,6 @@ public:
       {
         auto& lvl_cfg = it->first;
         auto& r = it->second;
-
-        //////////////////////
-        // std::vector<uint8_t> perm( N );
-        // for ( uint8_t i = 0; i < N; i++ )
-        // {
-        //   perm[r.input_perm[i]] = i;
-        // }
-        //  auto lvls = lvl_cfg_to_vec(lvl_cfg, 4u);
-        //  std::vector<uint8_t> tmp(4u);
-        //  for (auto j = 0u; j < 4u; j++) {
-        //    tmp[j] = lvls[perm[j]];
-        //  }
-        //  std::reverse(tmp.begin(), tmp.begin() + r.ntk.input_slots.size() - (r.ntk.zero_input ? 1 : 0));
-        //  for (auto j = 0u; j < 4u; j++) {
-        //    lvls[j] = tmp[r.input_perm[j]];
-        //  }
-        //  auto lvl_cfg_new = lvl_cfg_from_vec(lvls);
-        // os << fmt::format( "{:08x}\n", lvl_cfg_new);
-        // UNCOMMENT NEXT LINE
-        //////////////////////
 
         os << fmt::format( "{:08x}\n", lvl_cfg );
         os << fmt::format( "{}\n", r.cost );
@@ -301,40 +272,6 @@ public:
           perm[i] = t;
         }
         std::getline( is, line ); // ignore the current line end
-
-        // std::vector<uint8_t> perm( N );
-        // for ( uint8_t i = 0; i < N; i++ )
-        // {
-        //   perm[r.input_perm[i]] = i;
-        // }
-        // auto lvls = lvl_cfg_to_vec(lvl_cfg, 4u);
-        /////////////////////////////////
-        // std::vector<uint8_t> tmp(4u);
-        // for (auto j = 0u; j < 4u; j++) {
-        //     tmp[j] = levels[perm[j]];
-        // }
-        // std::reverse(tmp.begin(), tmp.begin() + ntk.input_slots.size() - (ntk.zero_input ? 1 : 0));
-
-        // for (auto j = 0u; j < 4u; j++) {
-        //     levels[perm[j]] = tmp[j];
-        // }
-        /////////////////////////////////
-        //  auto lvl_cfg_new = lvl_cfg_from_vec(lvls);
-        // os << fmt::format( "{:08x}\n", lvl_cfg_new);
-        // fix permutations
-        // reverse permutation twice
-        // std::vector<uint8_t> tmp(N);
-        // for(int i = 0; i < N; i++) {
-        //   tmp[perm[i]] = levels[i];
-        // }
-
-        //   std::reverse(tmp.begin(), tmp.end());
-        //  for(int i = 0; i < N; i++) {
-        //    levels[perm[i]] = tmp[i];
-        //  }
-        // levels = tmp;
-        // std::cout << "reversing\n";
-        ////////////////////////////
 
         lvl_cfg = lvl_cfg_from_vec( levels );
 
@@ -627,8 +564,6 @@ private:
             ith_gate_config == 1ul ? ~tt[net.nodes[i - 1][1]] : tt[net.nodes[i - 1][1]],
             ith_gate_config == 2ul ? ~tt[net.nodes[i - 1][2]] : tt[net.nodes[i - 1][2]] );
       }
-
-      // fmt::print("\tcomputed tt = {:04x}\n", tt[0] & 0xffff);
 
       if ( func == ( tt[0] & 0xffff ) )
       {
