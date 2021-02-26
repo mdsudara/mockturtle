@@ -24,10 +24,10 @@
  */
 
 /*!
-  \file aqfp_net.hpp
+  \file aqfp.hpp
   \brief AQFP network implementation
 
-  \author Dewmini Sudara 
+  \author Dewmini Sudara
 */
 
 #pragma once
@@ -57,35 +57,32 @@ struct aqfp_storage_data
   uint32_t trav_id = 0u;
 };
 
-/*! \brief AQFP network storage container
+enum class aqfp_node_type
+{
+  node_type_pi,
+  node_type_ro,
+  node_type_buf,
+  node_type_maj
+};
 
-  MIGs have nodes with fan-in 3.  We split of one bit of the index pointer to
-  store a complemented attribute.  Every node has 64-bit of additional data
-  used for the following purposes:
+/*! \brief AQFP storage container
+
+  We use one bit of the index pointer to store a complemented attribute.  
+  Every node has 64-bit of additional data used for the following purposes:
 
   `data[0].h1`: Fan-out size (we use MSB to indicate whether a node is dead)
   `data[0].h2`: Application-specific value
   `data[1].h1`: Visited flag
-  `data[1].h2`: Node type 0 for majority gate, n for fanout-n splitters (1 == buffer)
-  `data[2]    : Node ID
+  `data[1].h2`: Node type (one of primary input, register output, buffer (or splitter), majority gate)
 */
 
-struct aqfp_node : regular_node<3, 3, 1>
-{
-  bool operator==( aqfp_node const& other ) const
-  {
-    return ( data[2].n == other.data[2].n ) && ( data[1].h2 == other.data[1].h2 ) && ( children == other.children );
-  }
-};
-
+using aqfp_node = mixed_fanin_node<2, 1>;
 using aqfp_storage = storage<aqfp_node, aqfp_storage_data>;
 
 class aqfp_network
 {
 public:
 #pragma region Types and constructors
-  static constexpr auto min_fanin_size = 3u;
-  static constexpr auto max_fanin_size = 3u;
 
   using base_type = aqfp_network;
   using storage = std::shared_ptr<aqfp_storage>;
@@ -175,6 +172,17 @@ public:
 #pragma endregion
 
 #pragma region Primary I / O and constants
+
+  void set_node_type( aqfp_node& n, aqfp_node_type t )
+  {
+    n.data[1].h2 = static_cast<uint32_t>( t );
+  }
+
+  aqfp_node_type get_node_type( const aqfp_node& n ) const
+  {
+    return static_cast<aqfp_node_type>( n.data[1].h2 );
+  }
+
   signal get_constant( bool value ) const
   {
     return { 0, static_cast<uint64_t>( value ? 1 : 0 ) };
@@ -186,7 +194,7 @@ public:
 
     const auto index = _storage->nodes.size();
     auto& node = _storage->nodes.emplace_back();
-    node.children[0].data = node.children[1].data = node.children[2].data = ~static_cast<uint64_t>( 0 );
+    set_node_type( node, aqfp_node_type::node_type_pi );
     _storage->inputs.emplace_back( index );
     ++_storage->data.num_pis;
     return { index, 0 };
@@ -210,7 +218,7 @@ public:
 
     auto const index = _storage->nodes.size();
     auto& node = _storage->nodes.emplace_back();
-    node.children[0].data = node.children[1].data = node.children[2].data = _storage->inputs.size();
+    set_node_type( node, aqfp_node_type::node_type_ro );
     _storage->inputs.emplace_back( index );
     return { index, 0 };
   }
@@ -246,17 +254,18 @@ public:
 
   bool is_ci( node const& n ) const
   {
-    return _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data;
+    auto n_type = get_node_type( _storage->nodes[n] );
+    return ( n == 0 ) || ( n_type == aqfp_node_type::node_type_pi ) || ( n_type == aqfp_node_type::node_type_ro );
   }
 
   bool is_pi( node const& n ) const
   {
-    return _storage->nodes[n].children[0].data == ~static_cast<uint64_t>( 0 ) && _storage->nodes[n].children[1].data == ~static_cast<uint64_t>( 0 ) && _storage->nodes[n].children[2].data == ~static_cast<uint64_t>( 0 );
+    return ( n != 0 ) && ( get_node_type( _storage->nodes[n] ) == aqfp_node_type::node_type_pi );
   }
 
   bool is_ro( node const& n ) const
   {
-    return _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data && _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data && _storage->nodes[n].children[0].data >= static_cast<uint64_t>( _storage->data.num_pis );
+    return ( get_node_type( _storage->nodes[n] ) == aqfp_node_type::node_type_ro );
   }
 
   bool constant_value( node const& n ) const
@@ -267,14 +276,39 @@ public:
 #pragma endregion
 
 #pragma region Create unary functions
+
+  /* Unlike MIG, this actually creates a buffer */
   signal create_buf( signal const& a )
   {
-    return a;
+    storage::element_type::node_type node;
+    set_node_type( node, aqfp_node_type::node_type_buf );
+
+    node.children.push_back( a );
+
+    const auto index = _storage->nodes.size();
+
+    if ( index >= .9 * _storage->nodes.capacity() )
+    {
+      _storage->nodes.reserve( static_cast<uint64_t>( 3.1415f * index ) );
+    }
+
+    _storage->nodes.push_back( node );
+
+    /* increase ref-count to children */
+    _storage->nodes[a.index].data[0].h1++;
+
+    for ( auto const& fn : _events->on_add )
+    {
+      fn( index );
+    }
+
+    return { index, 0 };
   }
 
+  /* Unlike MIG, this actually creates a buffer and return the complemented signal */
   signal create_not( signal const& a )
   {
-    return !a;
+    return !create_buf(a);
   }
 #pragma endregion
 
@@ -310,9 +344,7 @@ public:
 
     /*  complemented edges minimization */
     auto node_complement = false;
-    if ( static_cast<unsigned>( a.complement ) + static_cast<unsigned>( b.complement ) +
-             static_cast<unsigned>( c.complement ) >=
-         2u )
+    if ( static_cast<unsigned>( a.complement ) + static_cast<unsigned>( b.complement ) + static_cast<unsigned>( c.complement ) >= 2u )
     {
       node_complement = true;
       a.complement = !a.complement;
@@ -321,30 +353,21 @@ public:
     }
 
     storage::element_type::node_type node;
+    set_node_type( node, aqfp_node_type::node_type_maj );
+
+    node.children.resize( 3u );
     node.children[0] = a;
     node.children[1] = b;
     node.children[2] = c;
-
-    /* NO structural hashing */
-    /* Allow duplicate nodes to be created */
-
-    // const auto it = _storage->hash.find( node );
-    // if ( it != _storage->hash.end() )
-    // {
-    //   return {it->second, node_complement};
-    // }
 
     const auto index = _storage->nodes.size();
 
     if ( index >= .9 * _storage->nodes.capacity() )
     {
       _storage->nodes.reserve( static_cast<uint64_t>( 3.1415f * index ) );
-      // _storage->hash.reserve( static_cast<uint64_t>( 3.1415f * index ) );
     }
 
     _storage->nodes.push_back( node );
-
-    // _storage->hash[node] = index;
 
     /* increase ref-count to children */
     _storage->nodes[a.index].data[0].h1++;
@@ -443,9 +466,7 @@ public:
 #pragma region Create arbitrary functions
   signal clone_node( aqfp_network const& other, node const& source, std::vector<signal> const& children )
   {
-    (void)other;
-    (void)source;
-    assert( children.size() == 3u );
+    assert( other.is_maj( source ) && children.size() == 3u );
     return create_maj( children[0u], children[1u], children[2u] );
   }
 #pragma endregion
@@ -455,85 +476,29 @@ public:
   {
     auto& node = _storage->nodes[n];
 
-    uint32_t fanin = 0u;
-    for ( auto i = 0u; i < 4u; ++i )
+    std::vector<signal> old_children;
+
+    for ( auto i = 0u; i <= node.children.size(); ++i )
     {
-      if ( i == 3u )
+      if ( i == node.children.size() )
       {
         return std::nullopt;
       }
 
+      old_children.push_back(signal{node.children[i]});
+
       if ( node.children[i].index == old_node )
       {
-        fanin = i;
+        node.children[i] = node.children[i].weight ? !new_signal : new_signal;
         new_signal.complement ^= node.children[i].weight;
-        break;
       }
     }
 
-    // determine potential new children of node n
-    signal child2 = new_signal;
-    signal child1 = node.children[( fanin + 1 ) % 3];
-    signal child0 = node.children[( fanin + 2 ) % 3];
-
-    if ( child0.index > child1.index )
-    {
-      std::swap( child0, child1 );
-    }
-    if ( child1.index > child2.index )
-    {
-      std::swap( child1, child2 );
-    }
-    if ( child0.index > child1.index )
-    {
-      std::swap( child0, child1 );
-    }
-
-    assert( child0.index <= child1.index );
-    assert( child1.index <= child2.index );
-
-    // check for trivial cases?
-    if ( child0.index == child1.index )
-    {
-      const auto diff_pol = child0.complement != child1.complement;
-      return std::make_pair( n, diff_pol ? child2 : child0 );
-    }
-    else if ( child1.index == child2.index )
-    {
-      const auto diff_pol = child1.complement != child2.complement;
-      return std::make_pair( n, diff_pol ? child0 : child1 );
-    }
-
-    // node already in hash table
-    // storage::element_type::node_type _hash_obj;
-    // _hash_obj.children[0] = child0;
-    // _hash_obj.children[1] = child1;
-    // _hash_obj.children[2] = child2;
-    // if ( const auto it = _storage->hash.find( _hash_obj ); it != _storage->hash.end() )
-    // {
-    //   return std::make_pair( n, signal( it->second, 0 ) );
-    // }
-
-    // remember before
-    const auto old_child0 = signal{ node.children[0] };
-    const auto old_child1 = signal{ node.children[1] };
-    const auto old_child2 = signal{ node.children[2] };
-
-    // erase old node in hash table
-    // _storage->hash.erase( node );
-
-    // insert updated node into hash table
-    node.children[0] = child0;
-    node.children[1] = child1;
-    node.children[2] = child2;
-    // _storage->hash[node] = n;
-
-    // update the reference counter of the new signal
-    _storage->nodes[new_signal.index].data[0].h1++;
+    /* TODO: do the simplifications if possible */
 
     for ( auto const& fn : _events->on_modified )
     {
-      fn( n, { old_child0, old_child1, old_child2 } );
+      fn( n, old_children );
     }
 
     return std::nullopt;
@@ -562,14 +527,13 @@ public:
 
     auto& nobj = _storage->nodes[n];
     nobj.data[0].h1 = UINT32_C( 0x80000000 ); /* fanout size 0, but dead */
-    // _storage->hash.erase( nobj );
 
     for ( auto const& fn : _events->on_delete )
     {
       fn( n );
     }
 
-    for ( auto i = 0u; i < 3u; ++i )
+    for ( auto i = 0u; i < nobj.children.size(); ++i )
     {
       if ( fanout_size( nobj.children[i].index ) == 0 )
       {
@@ -694,20 +658,13 @@ public:
 
   auto num_gates() const
   {
-    // TODO: check if this is correct
-    return static_cast<uint32_t>( _storage->nodes.size() - 1u );
+    return static_cast<uint32_t>( _storage->nodes.size() - 1u - _storage->inputs.size() );
   }
 
   uint32_t fanin_size( node const& n ) const
   {
-    if ( is_constant( n ) || is_ci( n ) ) {
+    if ( is_constant( n ) || is_ci( n ) )
       return 0;
-    }
-
-    if (is_buffer_or_splitter(n)) {
-      return 1;
-    }
-
     return 3;
   }
 
@@ -746,8 +703,7 @@ public:
 
   bool is_maj( node const& n ) const
   {
-    // TODO: check if this is correct
-    return n > 0 && !is_ci( n ) && ( _storage->nodes[n].data[1].h2 == 0u );
+    return n > 0 && !is_ci( n );
   }
 
   bool is_ite( node const& n ) const
@@ -779,31 +735,28 @@ public:
     (void)n;
     return false;
   }
-
-  bool is_buffer_or_splitter( node const& n ) const
-  {
-    return n > 0 && !is_ci( n ) && ( _storage->nodes[n].data[1].h2 > 0u );
-  }
-
 #pragma endregion
 
 #pragma region Functional properties
   kitty::dynamic_truth_table node_function( const node& n ) const
   {
-    if ( is_buffer_or_splitter(n) ) {
+    auto n_type = get_node_type( _storage->nodes[n] );
+
+    if ( n_type != aqfp_node_type::node_type_maj )
+    {
       kitty::dynamic_truth_table _buf( 1 );
-      _buf._bits[0] = 0x02;
+      _buf._bits[0] = 0x2;
       return _buf;
     }
-
-    if ( is_maj( n ) )
+    else
     {
+      /* TODO: support majorities with more than 3 inputs */
+      assert( _storage->nodes[n].children.size() == 3u );
+
       kitty::dynamic_truth_table _maj( 3 );
       _maj._bits[0] = 0xe8;
       return _maj;
     }
-
-    return kitty::dynamic_truth_table( 0 );
   }
 #pragma endregion
 
@@ -871,9 +824,16 @@ public:
 
   uint32_t ci_index( node const& n ) const
   {
-    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data &&
-            _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data );
-    return static_cast<uint32_t>( _storage->nodes[n].children[0].data );
+    uint32_t i = -1;
+    foreach_ci( [&]( const auto& x, auto index ) {
+      if ( x == n )
+      {
+        i = index;
+        return false;
+      }
+      return true;
+    } );
+    return i;
   }
 
   uint32_t co_index( signal const& s ) const
@@ -892,11 +852,16 @@ public:
 
   uint32_t pi_index( node const& n ) const
   {
-    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data &&
-            _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data );
-    assert( _storage->nodes[n].children[0].data < _storage->data.num_pis );
-
-    return static_cast<uint32_t>( _storage->nodes[n].children[0].data );
+    uint32_t i = -1;
+    foreach_pi( [&]( const auto& x, auto index ) {
+      if ( x == n )
+      {
+        i = index;
+        return false;
+      }
+      return true;
+    } );
+    return i;
   }
 
   uint32_t po_index( signal const& s ) const
@@ -915,11 +880,16 @@ public:
 
   uint32_t ro_index( node const& n ) const
   {
-    assert( _storage->nodes[n].children[0].data == _storage->nodes[n].children[1].data &&
-            _storage->nodes[n].children[0].data == _storage->nodes[n].children[2].data );
-    assert( _storage->nodes[n].children[0].data >= _storage->data.num_pis );
-
-    return static_cast<uint32_t>( _storage->nodes[n].children[0].data - _storage->data.num_pis );
+    uint32_t i = -1;
+    foreach_ro( [&]( const auto& x, auto index ) {
+      if ( x == n )
+      {
+        i = index;
+        return false;
+      }
+      return true;
+    } );
+    return i;
   }
 
   uint32_t ri_index( signal const& s ) const
@@ -938,7 +908,7 @@ public:
 
   signal ro_to_ri( signal const& s ) const
   {
-    return *( _storage->outputs.begin() + _storage->data.num_pos + _storage->nodes[s.index].children[0].data - _storage->data.num_pis );
+    return *( _storage->outputs.begin() + _storage->data.num_pos + ro_index( s.index ) - _storage->data.num_pis );
   }
 
   node ri_to_ro( signal const& s ) const
@@ -1060,34 +1030,35 @@ public:
                    detail::is_callable_without_index_v<Fn, signal, void> ||
                    detail::is_callable_with_index_v<Fn, signal, void> );
 
-    // we don't use foreach_element here to have better performance
     if constexpr ( detail::is_callable_without_index_v<Fn, signal, bool> )
     {
-      if ( !fn( signal{ _storage->nodes[n].children[0] } ) )
-        return;
-      if ( !fn( signal{ _storage->nodes[n].children[1] } ) )
-        return;
-      fn( signal{ _storage->nodes[n].children[2] } );
+      for ( auto i = 0u; i < _storage->nodes[n].children.size(); i++ )
+      {
+        if ( !fn( signal{ _storage->nodes[n].children[i] } ) )
+          return;
+      }
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, signal, bool> )
     {
-      if ( !fn( signal{ _storage->nodes[n].children[0] }, 0 ) )
-        return;
-      if ( !fn( signal{ _storage->nodes[n].children[1] }, 1 ) )
-        return;
-      fn( signal{ _storage->nodes[n].children[2] }, 2 );
+      for ( auto i = 0u; i < _storage->nodes[n].children.size(); i++ )
+      {
+        if ( !fn( signal{ _storage->nodes[n].children[i] }, i ) )
+          return;
+      }
     }
     else if constexpr ( detail::is_callable_without_index_v<Fn, signal, void> )
     {
-      fn( signal{ _storage->nodes[n].children[0] } );
-      fn( signal{ _storage->nodes[n].children[1] } );
-      fn( signal{ _storage->nodes[n].children[2] } );
+      for ( auto i = 0u; i < _storage->nodes[n].children.size(); i++ )
+      {
+        fn( signal{ _storage->nodes[n].children[i] } );
+      }
     }
     else if constexpr ( detail::is_callable_with_index_v<Fn, signal, void> )
     {
-      fn( signal{ _storage->nodes[n].children[0] }, 0 );
-      fn( signal{ _storage->nodes[n].children[1] }, 1 );
-      fn( signal{ _storage->nodes[n].children[2] }, 2 );
+      for ( auto i = 0u; i < _storage->nodes[n].children.size(); i++ )
+      {
+        fn( signal{ _storage->nodes[n].children[i] }, i );
+      }
     }
   }
 #pragma endregion
@@ -1101,20 +1072,29 @@ public:
 
     assert( n != 0 && !is_ci( n ) );
 
+    auto n_type = get_node_type( _storage->nodes[n] );
+    assert( n_type == aqfp_node_type::node_type_maj || n_type == aqfp_node_type::node_type_buf );
+
     auto const& c1 = _storage->nodes[n].children[0];
     auto v1 = *begin++;
 
-    if (is_buffer_or_splitter(n)) {
+    if ( n_type == aqfp_node_type::node_type_maj )
+    {
+      assert( _storage->nodes[n].children.size() == 3u );
+      /* TODO: support majorities with more than 3 fanins */
+
+      auto const& c2 = _storage->nodes[n].children[1];
+      auto const& c3 = _storage->nodes[n].children[2];
+
+      auto v2 = *begin++;
+      auto v3 = *begin++;
+
+      return ( ( v1 ^ c1.weight ) && ( v2 ^ c2.weight ) ) || ( ( v3 ^ c3.weight ) && ( v1 ^ c1.weight ) ) || ( ( v3 ^ c3.weight ) && ( v2 ^ c2.weight ) );
+    }
+    else
+    {
       return v1 ^ c1.weight;
     }
-
-    auto const& c2 = _storage->nodes[n].children[1];
-    auto const& c3 = _storage->nodes[n].children[2];
-
-    auto v2 = *begin++;
-    auto v3 = *begin++;
-
-    return ( ( v1 ^ c1.weight ) && ( v2 ^ c2.weight ) ) || ( ( v3 ^ c3.weight ) && ( v1 ^ c1.weight ) ) || ( ( v3 ^ c3.weight ) && ( v2 ^ c2.weight ) );
   }
 
   template<typename Iterator>
@@ -1125,22 +1105,29 @@ public:
 
     assert( n != 0 && !is_ci( n ) );
 
+    auto n_type = get_node_type( _storage->nodes[n] );
+    assert( n_type == aqfp_node_type::node_type_maj || n_type == aqfp_node_type::node_type_buf );
+
     auto const& c1 = _storage->nodes[n].children[0];
     auto tt1 = *begin++;
 
-    if (is_buffer_or_splitter(n)) {
-      return c1.weight ? ~tt1 : tt1 ;
+    if ( n_type == aqfp_node_type::node_type_maj )
+    {
+      assert( _storage->nodes[n].children.size() == 3u );
+      /* TODO: support majorities with more than 3 fanins */
+
+      auto const& c2 = _storage->nodes[n].children[1];
+      auto const& c3 = _storage->nodes[n].children[2];
+
+      auto tt2 = *begin++;
+      auto tt3 = *begin++;
+
+      return kitty::ternary_majority( c1.weight ? ~tt1 : tt1, c2.weight ? ~tt2 : tt2, c3.weight ? ~tt3 : tt3 );
     }
-
-    // majority gate
-
-    auto const& c2 = _storage->nodes[n].children[1];
-    auto const& c3 = _storage->nodes[n].children[2];
-
-    auto tt2 = *begin++;
-    auto tt3 = *begin++;
-
-    return kitty::ternary_majority( c1.weight ? ~tt1 : tt1, c2.weight ? ~tt2 : tt2, c3.weight ? ~tt3 : tt3 );
+    else
+    {
+      return c1.weight ? ~tt1 : tt1;
+    }
   }
 
   /*! \brief Re-compute the last block. */
@@ -1152,34 +1139,41 @@ public:
     (void)end;
     assert( n != 0 && !is_ci( n ) );
 
+    auto n_type = get_node_type( _storage->nodes[n] );
+    assert( n_type == aqfp_node_type::node_type_maj || n_type == aqfp_node_type::node_type_buf );
+
     auto const& c1 = _storage->nodes[n].children[0];
     auto tt1 = *begin++;
 
-    if (is_buffer_or_splitter(n)) {
+    if ( n_type == aqfp_node_type::node_type_maj )
+    {
+      assert( _storage->nodes[n].children.size() == 3u );
+      /* TODO: support majorities with more than 3 fanins */
+
+      auto const& c2 = _storage->nodes[n].children[1];
+      auto const& c3 = _storage->nodes[n].children[2];
+
+      auto tt2 = *begin++;
+      auto tt3 = *begin++;
+
+      assert( tt1.num_bits() > 0 && "truth tables must not be empty" );
+      assert( tt1.num_bits() == tt2.num_bits() );
+      assert( tt1.num_bits() == tt3.num_bits() );
+      assert( tt1.num_bits() >= result.num_bits() );
+      assert( result.num_blocks() == tt1.num_blocks() || ( result.num_blocks() == tt1.num_blocks() - 1 && result.num_bits() % 64 == 0 ) );
+
       result.resize( tt1.num_bits() );
-      result._bits.back() = c1.weight ? ~tt1._bits.back() : tt1._bits.back();
-      return;
+      result._bits.back() =
+          ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) ) |
+          ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) ) |
+          ( ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) );
+    }
+    else
+    {
+      result.resize( tt1.num_bits() );
+      result._bits.back() = ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) );
     }
 
-    // majority gate
-
-    auto const& c2 = _storage->nodes[n].children[1];
-    auto const& c3 = _storage->nodes[n].children[2];
-
-    auto tt2 = *begin++;
-    auto tt3 = *begin++;
-
-    assert( tt1.num_bits() > 0 && "truth tables must not be empty" );
-    assert( tt1.num_bits() == tt2.num_bits() );
-    assert( tt1.num_bits() == tt3.num_bits() );
-    assert( tt1.num_bits() >= result.num_bits() );
-    assert( result.num_blocks() == tt1.num_blocks() || ( result.num_blocks() == tt1.num_blocks() - 1 && result.num_bits() % 64 == 0 ) );
-
-    result.resize( tt1.num_bits() );
-    result._bits.back() =
-        ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) ) |
-        ( ( c1.weight ? ~tt1._bits.back() : tt1._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) ) |
-        ( ( c2.weight ? ~tt2._bits.back() : tt2._bits.back() ) & ( c3.weight ? ~tt3._bits.back() : tt3._bits.back() ) );
     result.mask_bits();
   }
 #pragma endregion
