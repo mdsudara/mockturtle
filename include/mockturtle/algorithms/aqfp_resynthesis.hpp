@@ -82,223 +82,183 @@ struct aqfp_resynthesis_stats
 template<typename NtkDest>
 struct aqfp_resynthesis_result
 {
-  node_map<uint32_t, NtkDest, std::unordered_map<node<NtkDest>, uint32_t>> node_level;
+  std::unordered_map<node<NtkDest>, uint32_t> level_of_node;
   uint32_t critical_po_level = 0u;
-  double gate_cost = 0.0;
-  double fanout_net_cost = 0.0;
   double total_cost = 0.0;
-
-  aqfp_resynthesis_result( NtkDest& ntk_dest ) : node_level( ntk_dest )
-  {
-  }
-
-  aqfp_resynthesis_result& operator=( aqfp_resynthesis_result& other )
-  {
-    total_cost = other.total_cost;
-    critical_po_level = other.critical_po_level;
-    return *this;
-  }
 };
 
 namespace detail
 {
 
-template<class NtkDest, class NtkSource, class ResynthesisFn>
+template<typename NtkDest, typename NtkSrc, typename NodeResynFn, typename FanoutResynFn>
 class aqfp_resynthesis_impl
 {
 public:
   aqfp_resynthesis_impl(
       NtkDest& ntk_dest,
-      NtkSource const& ntk,
-      ResynthesisFn&& resynthesis_fn,
+      NtkSrc const& ntk_src,
+      NodeResynFn&& node_resyn_fn,
+      FanoutResynFn&& fanout_resyn_fn,
       aqfp_resynthesis_params const& ps,
-      aqfp_resynthesis_result<NtkDest>& result,
       aqfp_resynthesis_stats& st )
       : ntk_dest( ntk_dest ),
-        ntk( ntk ),
-        resynthesis_fn( resynthesis_fn ),
+        ntk_src( ntk_src ),
+        node_resyn_fn( node_resyn_fn ),
+        fanout_resyn_fn( fanout_resyn_fn ),
         ps( ps ),
-        result( result ),
         st( st )
   {
   }
 
-  void run()
+  aqfp_resynthesis_result<NtkDest> run()
   {
     stopwatch t( st.time_total );
 
-    node_map<signal<NtkDest>, NtkSource> node2new( ntk );
+    node_map<signal<NtkDest>, NtkSrc> node2new( ntk_src );
+    std::unordered_map<node<NtkDest>, uint32_t> level_of_node;
+    std::map<std::pair<node<NtkSrc>, node<NtkSrc>>, uint32_t> level_for_fanout;
+    uint32_t critical_po_level = 0;
+
 
     /* map constants */
     auto c0 = ntk_dest.get_constant( false );
-    node2new[ntk.get_node( ntk.get_constant( false ) )] = c0;
-    result.node_level[ntk_dest.get_node( c0 )] = 0u;
+    node2new[ntk_src.get_node( ntk_src.get_constant( false ) )] = c0;
+    level_of_node[ntk_dest.get_node( c0 )] = 0u;
 
-    if ( ntk.get_node( ntk.get_constant( true ) ) != ntk.get_node( ntk.get_constant( false ) ) )
+    if ( ntk_src.get_node( ntk_src.get_constant( true ) ) != ntk_src.get_node( ntk_src.get_constant( false ) ) )
     {
       auto c1 = ntk_dest.get_constant( true );
-      node2new[ntk.get_node( ntk.get_constant( true ) )] = c1;
-      result.node_level[ntk_dest.get_node( c1 )] = 0u;
+      node2new[ntk_src.get_node( ntk_src.get_constant( true ) )] = c1;
+      level_of_node[ntk_dest.get_node( c1 )] = 0u;
     }
 
     /* map primary inputs */
-    ntk.foreach_pi( [&]( auto n ) {
+    ntk_src.foreach_pi( [&]( auto n ) {
       auto pi = ntk_dest.create_pi();
       node2new[n] = pi;
-      result.node_level[ntk_dest.get_node( pi )] = 0u;
+      level_of_node[ntk_dest.get_node( pi )] = 0u;
 
-      if constexpr ( has_has_name_v<NtkSource> && has_get_name_v<NtkSource> && has_set_name_v<NtkDest> )
+      if constexpr ( has_has_name_v<NtkSrc> && has_get_name_v<NtkSrc> && has_set_name_v<NtkDest> )
       {
-        if ( ntk.has_name( ntk.make_signal( n ) ) )
-          ntk_dest.set_name( node2new[n], ntk.get_name( ntk.make_signal( n ) ) );
+        if ( ntk_src.has_name( ntk_src.make_signal( n ) ) )
+          ntk_dest.set_name( node2new[n], ntk_src.get_name( ntk_src.make_signal( n ) ) );
       }
     } );
 
-    ntk.foreach_ro( [&]( auto n ) {
+    /* map register outputs */
+    ntk_src.foreach_ro( [&]( auto n ) {
       auto ro = ntk_dest.create_ro();
       node2new[n] = ro;
-      result.node_level[ntk_dest.get_node( ro )] = 0u;
+      level_of_node[ntk_dest.get_node( ro )] = 0u;
 
-      ntk_dest._storage->latch_information[ntk_dest.get_node( node2new[n] )] = ntk._storage->latch_information[n];
-      if constexpr ( has_has_name_v<NtkSource> && has_get_name_v<NtkSource> && has_set_name_v<NtkDest> )
+      ntk_dest._storage->latch_information[ntk_dest.get_node( node2new[n] )] = ntk_src._storage->latch_information[n];
+      if constexpr ( has_has_name_v<NtkSrc> && has_get_name_v<NtkSrc> && has_set_name_v<NtkDest> )
       {
-        if ( ntk.has_name( ntk.make_signal( n ) ) )
-          ntk_dest.set_name( node2new[n], ntk.get_name( ntk.make_signal( n ) ) );
+        if ( ntk_src.has_name( ntk_src.make_signal( n ) ) )
+          ntk_dest.set_name( node2new[n], ntk_src.get_name( ntk_src.make_signal( n ) ) );
       }
     } );
 
-    /* map nodes */
-    fanout_view ntk_fanout{ ntk };
+    fanout_view ntk_fanout{ ntk_src };
     depth_view ntk_depth{ ntk_fanout };
     topo_view ntk_topo{ ntk_depth };
 
+    /* map nodes */
     ntk_topo.foreach_node( [&]( auto n ) {
-      if ( ntk.is_constant( n ) || ntk.is_ci( n ) )
+      if ( ntk_src.is_constant( n ) || ntk_src.is_ci( n ) )
         return;
 
-      std::vector<signal<NtkDest>> children;
-      ntk.foreach_fanin( n, [&]( auto const& f ) {
-        children.push_back( ntk.is_complemented( f ) ? ntk_dest.create_not( node2new[f] ) : node2new[f] );
+      /* synthesize node `n` */
+      std::vector<std::pair<signal<NtkDest>, uint32_t>> children;
+      ntk_src.foreach_fanin( n, [&]( auto const& f ) {
+        children.push_back( { ntk_src.is_complemented( f ) ? ntk_dest.create_not( node2new[f] ) : node2new[f], level_for_fanout[{ ntk_src.get_node( f ), n }] } );
       } );
 
-      bool performed_resyn = false;
-      resynthesis_fn( ntk_topo, n, ntk_dest, ntk.node_function( n ), children.begin(), children.end(), result, [&]( auto const& f ) {
-        node2new[n] = f;
+      auto performed_resyn = false;
+      auto level_update_callback =
+          [&](const auto& n, uint32_t level ) {
+            if ( !level_of_node.count( n ) )
+            {
+              level_of_node[n] = level;
+            }
+          };
 
-        if constexpr ( has_has_name_v<NtkSource> && has_get_name_v<NtkSource> && has_set_name_v<NtkDest> )
-        {
-          if ( ntk.has_name( ntk.make_signal( n ) ) )
-            ntk_dest.set_name( f, ntk.get_name( ntk.make_signal( n ) ) );
-        }
+      auto resyn_performed_callback =
+          [&](const auto&  f) {
+            node2new[n] = f;
 
-        performed_resyn = true;
-        return false;
-      } );
+            if constexpr ( has_has_name_v<NtkSrc> && has_get_name_v<NtkSrc> && has_set_name_v<NtkDest> )
+            {
+              if ( ntk_src.has_name( ntk_src.make_signal( n ) ) )
+                ntk_dest.set_name( f, ntk_src.get_name( ntk_src.make_signal( n ) ) );
+            }
+
+            performed_resyn = true;
+          };
+      node_resyn_fn( ntk_dest, ntk_src.node_function( n ), children.begin(), children.end(), level_update_callback, resyn_performed_callback );
 
       if ( !performed_resyn )
       {
-        fmt::print( "[e] could not perform resynthesis for node {} in node_resynthesis\n", ntk.node_to_index( n ) );
+        fmt::print( "[e] could not perform resynthesis for node {} in node_resynthesis\n", ntk_src.node_to_index( n ) );
         std::abort();
       }
+
+      /* synthesize fanout net of `n`*/
+      auto fanout_node_callback = [&]( const auto& f, const auto& level ) {
+        level_for_fanout[{n, f}] = level; 
+      };
+
+      auto fanout_po_callback = [&]( const auto& index, const auto& level) {
+        (void) index;
+        critical_po_level = std::max(critical_po_level, level);
+      };
+
+      fanout_resyn_fn( ntk_topo, n, ntk_dest, node2new[n], level_of_node[ntk_dest.get_node(node2new[n])], fanout_node_callback, fanout_po_callback);
     } );
 
     /* map primary outputs */
-    ntk.foreach_po( [&]( auto const& f, auto index ) {
+    ntk_src.foreach_po( [&]( auto const& f, auto index ) {
       (void)index;
 
-      auto const o = ntk.is_complemented( f ) ? !node2new[f] : node2new[f];
+      auto const o = ntk_src.is_complemented( f ) ? !node2new[f] : node2new[f];
       ntk_dest.create_po( o );
 
-      if constexpr ( has_has_output_name_v<NtkSource> && has_get_output_name_v<NtkSource> && has_set_output_name_v<NtkDest> )
+      if constexpr ( has_has_output_name_v<NtkSrc> && has_get_output_name_v<NtkSrc> && has_set_output_name_v<NtkDest> )
       {
-        if ( ntk.has_output_name( index ) )
+        if ( ntk_src.has_output_name( index ) )
         {
-          ntk_dest.set_output_name( index, ntk.get_output_name( index ) );
+          ntk_dest.set_output_name( index, ntk_src.get_output_name( index ) );
         }
       }
     } );
 
-    ntk.foreach_ri( [&]( auto const& f, auto index ) {
+    ntk_src.foreach_ri( [&]( auto const& f, auto index ) {
       (void)index;
 
-      auto const o = ntk.is_complemented( f ) ? ntk_dest.create_not( node2new[f] ) : node2new[f];
+      auto const o = ntk_src.is_complemented( f ) ? ntk_dest.create_not( node2new[f] ) : node2new[f];
       ntk_dest.create_ri( o );
 
-      if constexpr ( has_has_output_name_v<NtkSource> && has_get_output_name_v<NtkSource> && has_set_output_name_v<NtkDest> )
+      if constexpr ( has_has_output_name_v<NtkSrc> && has_get_output_name_v<NtkSrc> && has_set_output_name_v<NtkDest> )
       {
-        if ( ntk.has_output_name( index ) )
+        if ( ntk_src.has_output_name( index ) )
         {
-          ntk_dest.set_output_name( index + ntk.num_pos(), ntk.get_output_name( index + ntk.num_pos() ) );
+          ntk_dest.set_output_name( index + ntk_src.num_pos(), ntk_src.get_output_name( index + ntk_src.num_pos() ) );
         }
       }
     } );
-  }
 
-  void update_cost()
-  {
-    fanout_view dest_fv{ ntk_dest };
-
-    std::vector<node<NtkDest>> internal_nodes;
-    dest_fv.foreach_node( [&]( auto n ) {
-      if ( dest_fv.is_constant( n ) || dest_fv.is_pi( n ) )
-      {
-        return;
-      }
-
-      if ( n > 0u && dest_fv.is_maj( n ) )
-      {
-        internal_nodes.push_back( n );
-      }
-    } );
-
-    for ( auto n : internal_nodes )
-    {
-      result.gate_cost += ps.gate_cost;
-
-      std::vector<uint32_t> rellev;
-
-      dest_fv.foreach_fanout( n, [&]( auto fo ) {
-        assert( result.node_level[fo] > result.node_level[n] );
-        rellev.push_back( result.node_level[fo] - result.node_level[n] );
-      } );
-
-      uint32_t pos = 0u;
-      while ( rellev.size() < dest_fv.fanout_size( n ) )
-      {
-        pos++;
-        rellev.push_back( result.critical_po_level - result.node_level[n] );
-      }
-
-      if ( rellev.size() > 1u || ( rellev.size() == 1u && rellev[0] > 0 ) )
-      {
-        std::sort( rellev.begin(), rellev.end() );
-        auto cst = cost_for_config( rellev );
-
-        // if ( cst > 1000 )
-        // {
-        //   dest_fv.foreach_fanout( n, [&]( auto fo ) {
-        //     fmt::print( "fanout {}\n", fo );
-        //   } );
-
-        //   fmt::print( "node = {}\n", n );
-        //   fmt::print( "cost of rellev = {}\n", cst );
-        //   fmt::print( "rellev = {}\n", fmt::join( rellev, " " ) );
-        // }
-
-        result.fanout_net_cost += cst;
-      }
-    }
-
-    result.total_cost = result.gate_cost + result.fanout_net_cost;
+    return { level_of_node, critical_po_level, compute_cost(level_of_node, critical_po_level) };
   }
 
 private:
   NtkDest& ntk_dest;
-  NtkSource const& ntk;
-  ResynthesisFn&& resynthesis_fn;
+  NtkSrc const& ntk_src;
+  NodeResynFn&& node_resyn_fn;
+  FanoutResynFn&& fanout_resyn_fn;
   aqfp_resynthesis_params const& ps;
-  aqfp_resynthesis_result<NtkDest>& result;
   aqfp_resynthesis_stats& st;
+
+
   std::map<std::vector<uint32_t>, double> rellev_cache;
 
   static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
@@ -362,39 +322,94 @@ private:
 
     return ( rellev_cache[config] = result );
   }
+
+  template<typename NodeLevelT>
+  double compute_cost(const NodeLevelT& level_of_node, uint32_t critical_po_level)
+  {
+    fanout_view dest_fv{ ntk_dest };
+    auto gate_cost = 0.0;
+    auto fanout_net_cost = 0.0;
+
+    std::vector<node<NtkDest>> internal_nodes;
+    dest_fv.foreach_node( [&]( auto n ) {
+      if ( dest_fv.is_constant( n ) || dest_fv.is_pi( n ) )
+      {
+        return;
+      }
+
+      if ( n > 0u && dest_fv.is_maj( n ) )
+      {
+        internal_nodes.push_back( n );
+      }
+    } );
+
+    for ( auto n : internal_nodes )
+    {
+      gate_cost += ps.gate_cost;
+
+      std::vector<uint32_t> rellev;
+
+      dest_fv.foreach_fanout( n, [&]( auto fo ) {
+        assert( level_of_node.at(fo) > level_of_node.at(n));
+        rellev.push_back( level_of_node.at(fo) - level_of_node.at(n) );
+      } );
+
+      uint32_t pos = 0u;
+      while ( rellev.size() < dest_fv.fanout_size( n ) )
+      {
+        pos++;
+        rellev.push_back( critical_po_level - level_of_node.at(n) );
+      }
+
+      if ( rellev.size() > 1u || ( rellev.size() == 1u && rellev[0] > 0 ) )
+      {
+        std::sort( rellev.begin(), rellev.end() );
+        auto cst = cost_for_config( rellev );
+
+        fanout_net_cost += cst;
+      }
+    }
+
+    return gate_cost + fanout_net_cost;
+  }
 };
 
 } /* namespace detail */
 
 /*! \brief Path balanced resynthesis algorithm. */
-template<class NtkDest, class NtkSource, class ResynthesisFn>
-aqfp_resynthesis_result<NtkDest> aqfp_resynthesize( NtkDest& ntk_dest, NtkSource const& ntk, ResynthesisFn&& resynthesis_fn, aqfp_resynthesis_params const& ps = { false, 6.0, 2.0, { { 4u, 2.0 } } }, aqfp_resynthesis_stats* pst = nullptr )
+template<class NtkDest, class NtkSrc, class NodeResynFn, class FanoutResynFn>
+aqfp_resynthesis_result<NtkDest> aqfp_resynthesis(
+    NtkDest& ntk_dest,
+    NtkSrc const& ntk_src,
+    NodeResynFn&& node_resyn_fn,
+    FanoutResynFn&& fanout_resyn_fn,
+    aqfp_resynthesis_params const& ps = { false, 6.0, 2.0, { { 4u, 2.0 } } },
+    aqfp_resynthesis_stats* pst = nullptr )
 {
-  static_assert( is_network_type_v<NtkSource>, "NtkSource is not a network type" );
+  static_assert( is_network_type_v<NtkSrc>, "NtkSrc is not a network type" );
   static_assert( is_network_type_v<NtkDest>, "NtkDest is not a network type" );
 
-  static_assert( has_get_node_v<NtkSource>, "NtkSource does not implement the get_node method" );
-  static_assert( has_get_constant_v<NtkSource>, "NtkSource does not implement the get_constant method" );
-  static_assert( has_foreach_pi_v<NtkSource>, "NtkSource does not implement the foreach_pi method" );
-  static_assert( has_foreach_node_v<NtkSource>, "NtkSource does not implement the foreach_node method" );
-  static_assert( has_is_constant_v<NtkSource>, "NtkSource does not implement the is_constant method" );
-  static_assert( has_is_pi_v<NtkSource>, "NtkSource does not implement the is_pi method" );
-  static_assert( has_is_complemented_v<NtkSource>, "NtkSource does not implement the is_complemented method" );
-  static_assert( has_foreach_fanin_v<NtkSource>, "NtkSource does not implement the foreach_fanin method" );
-  static_assert( has_node_function_v<NtkSource>, "NtkSource does not implement the node_function method" );
-  static_assert( has_foreach_po_v<NtkSource>, "NtkSource does not implement the foreach_po method" );
+  static_assert( has_get_node_v<NtkSrc>, "NtkSrc does not implement the get_node method" );
+  static_assert( has_get_constant_v<NtkSrc>, "NtkSrc does not implement the get_constant method" );
+  static_assert( has_foreach_pi_v<NtkSrc>, "NtkSrc does not implement the foreach_pi method" );
+  static_assert( has_foreach_node_v<NtkSrc>, "NtkSrc does not implement the foreach_node method" );
+  static_assert( has_is_constant_v<NtkSrc>, "NtkSrc does not implement the is_constant method" );
+  static_assert( has_is_pi_v<NtkSrc>, "NtkSrc does not implement the is_pi method" );
+  static_assert( has_is_complemented_v<NtkSrc>, "NtkSrc does not implement the is_complemented method" );
+  static_assert( has_foreach_fanin_v<NtkSrc>, "NtkSrc does not implement the foreach_fanin method" );
+  static_assert( has_node_function_v<NtkSrc>, "NtkSrc does not implement the node_function method" );
+  static_assert( has_foreach_po_v<NtkSrc>, "NtkSrc does not implement the foreach_po method" );
 
   static_assert( has_get_constant_v<NtkDest>, "NtkDest does not implement the get_constant method" );
   static_assert( has_create_pi_v<NtkDest>, "NtkDest does not implement the create_pi method" );
   static_assert( has_create_not_v<NtkDest>, "NtkDest does not implement the create_not method" );
   static_assert( has_create_po_v<NtkDest>, "NtkDest does not implement the create_po method" );
 
-  aqfp_resynthesis_result<NtkDest> result( ntk_dest );
   aqfp_resynthesis_stats st;
-  resynthesis_fn.clear_state();
-  detail::aqfp_resynthesis_impl<NtkDest, NtkSource, ResynthesisFn> p( ntk_dest, ntk, resynthesis_fn, ps, result, st );
-  p.run();
-  p.update_cost();
+
+  detail::aqfp_resynthesis_impl<NtkDest, NtkSrc, NodeResynFn, FanoutResynFn> p( ntk_dest, ntk_src, node_resyn_fn, fanout_resyn_fn, ps, st );
+  auto result = p.run();
+
   if ( ps.verbose )
   {
     st.report();

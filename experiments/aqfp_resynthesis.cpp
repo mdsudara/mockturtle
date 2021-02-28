@@ -25,7 +25,8 @@
 
 #include <mockturtle/algorithms/cleanup.hpp>
 
-#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_resyn.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_node_resyn.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_fanout_resyn.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/dag.hpp>
 
 #include <mockturtle/algorithms/aqfp_resynthesis.hpp>
@@ -119,19 +120,19 @@ std::vector<std::string> mcnc = {
     "c5315.v",
     "c880.v",
 
-    "chkn.v",
-    "count.v",
-    "dist.v",
-    "in5.v",
-    "in6.v",
-    "k2.v",
-    "m3.v",
-    "max512.v",
-    "misex3.v",
-    "mlp4.v",
-    "prom2.v",
-    "sqr6.v",
-    "x1dn.v",
+    // "chkn.v",
+    // "count.v",
+    // "dist.v",
+    // "in5.v",
+    // "in6.v",
+    // "k2.v",
+    // "m3.v",
+    // "max512.v",
+    // "misex3.v",
+    // "mlp4.v",
+    // "prom2.v",
+    // "sqr6.v",
+    // "x1dn.v",
 };
 
 template<class Ntk>
@@ -217,6 +218,8 @@ void experiment_aqfp_exact_syn_only( AqfpSynT& aqfp_resyn, const std::vector<std
           "    JJ Depth", "        #JJ",
           "OPT JJ Depth", "    OPT #JJ" );
 
+   mockturtle::aqfp_fanout_resyn fanout_resyn(4u);
+
   for ( auto b : benchmarks )
   {
     fmt::print( "Processing benchmark {}...\n", b );
@@ -230,18 +233,18 @@ void experiment_aqfp_exact_syn_only( AqfpSynT& aqfp_resyn, const std::vector<std
     /* 1. Directly map to AQFP */
     mockturtle::klut_network klut_orig = lut_map_old( mig, benchmark, "temp", 4 );
     mockturtle::aqfp_network aqfp_net_1;
-    auto res_orig = mockturtle::aqfp_resynthesize( aqfp_net_1, klut_orig, aqfp_resyn );
+    auto res_orig = mockturtle::aqfp_resynthesis( aqfp_net_1, klut_orig, aqfp_resyn, fanout_resyn);
 
     /* 2. Repeatedly apply exact AQFP synthesis */
     mockturtle::aqfp_network opt_aqfp;
-    auto res_opt = mockturtle::aqfp_resynthesize( opt_aqfp, klut_orig, aqfp_resyn );
+    auto res_opt = mockturtle::aqfp_resynthesis( opt_aqfp, klut_orig, aqfp_resyn, fanout_resyn );
 
     for ( auto i = 2u; i <= 10u; i++ )
     {
       auto klut_opt = lut_map_old( opt_aqfp, benchmark, "temp", 4 );
 
       opt_aqfp = mockturtle::aqfp_network();
-      auto res_opt1 = mockturtle::aqfp_resynthesize( opt_aqfp, klut_opt, aqfp_resyn );
+      auto res_opt1 = mockturtle::aqfp_resynthesis( opt_aqfp, klut_opt, aqfp_resyn, fanout_resyn );
 
       if ( strategy == "cost" && has_better_cost( res_opt1, res_opt ) )
       {
@@ -277,7 +280,7 @@ int main( int argc, char** argv )
   std::string method( argv[1] );
 
   mockturtle::aqfp_node_resyn_param ps_cost{ "aqfp_db_2020_feb_05.txt", { { 4u, 2.0 } }, 2.0, mockturtle::aqfp_node_resyn_strategy::best_cost, 0u };
-  mockturtle::aqfp_resyn<mockturtle::node<mockturtle::aqfp_network>, mockturtle::node<mockturtle::klut_network>> aqfp_syn_cost( ps_cost );
+  mockturtle::aqfp_node_resyn<mockturtle::node<mockturtle::aqfp_network>, mockturtle::node<mockturtle::klut_network>> aqfp_syn_cost( ps_cost );
 
   if ( method == "cost" )
   {
@@ -285,7 +288,7 @@ int main( int argc, char** argv )
   }
 
   mockturtle::aqfp_node_resyn_param ps_level{ "aqfp_db_2020_feb_05.txt", { { 4u, 2.0 } }, 2.0, mockturtle::aqfp_node_resyn_strategy::best_level, 0u };
-  mockturtle::aqfp_resyn<mockturtle::node<mockturtle::aqfp_network>, mockturtle::node<mockturtle::klut_network>> aqfp_syn_level( ps_level );
+  mockturtle::aqfp_node_resyn<mockturtle::node<mockturtle::aqfp_network>, mockturtle::node<mockturtle::klut_network>> aqfp_syn_level( ps_level );
 
   if ( method == "level" )
   {

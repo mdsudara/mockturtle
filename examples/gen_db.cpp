@@ -9,11 +9,11 @@
 #include <thread>
 #include <vector>
 
-#include <mockturtle/algorithms/exact_syn/aqfp_db.hpp>
-#include <mockturtle/algorithms/exact_syn/dag_cost.hpp>
-#include <mockturtle/algorithms/exact_syn/gen_dag.hpp>
-#include <mockturtle/algorithms/exact_syn/generate_db.hpp>
-#include <mockturtle/algorithms/exact_syn/sat.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/dag_cost.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/gen_dag.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/generate_db.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/sat.hpp>
 
 void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, const std::map<uint32_t, uint32_t>& max_gates_of_fanin = { { 3u, 7u } }, uint32_t max_gates = 7u, uint32_t max_num_in = 5u, uint32_t max_levels = 7u, bool count_only = false)
 {
@@ -226,7 +226,7 @@ int main( int argc, char** argv )
       auto max_gates = std::stoul(std::string(argv[4]));
       auto max_num_in = std::stoul(std::string(argv[5]));
       auto max_levels = std::stoul(std::string(argv[6]));
-      generate_dag_db(allowed_num_fanins, max_gates_of_fanin, max_gates, max_num_in, max_levels, true);
+      generate_dag_db(allowed_num_fanins, max_gates_of_fanin, max_gates, max_num_in, max_levels, false);
     }
 
   }

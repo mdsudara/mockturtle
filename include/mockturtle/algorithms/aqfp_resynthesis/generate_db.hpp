@@ -53,8 +53,8 @@ void generate_all_dags( const mockturtle::dag_generator_params& params, std::ost
   }
   auto t2 = std::chrono::high_resolution_clock::now();
   auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>( t2 - t0 );
-  std::cout << fmt::format( "Number of DAGs generated {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
-  std::cout << fmt::format( "Number of DAGs of different input counts: [{}]\n", fmt::join(counts_inp, " "));
+  std::cerr << fmt::format( "Number of DAGs generated {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
+  std::cerr << fmt::format( "Number of DAGs of different input counts: [{}]\n", fmt::join(counts_inp, " "));
 }
 
 /**
