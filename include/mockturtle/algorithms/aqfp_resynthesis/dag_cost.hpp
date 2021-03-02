@@ -33,7 +33,7 @@ public:
   }
 
 private:
-  const std::unordered_map<uint32_t, double> gate_costs;
+  std::unordered_map<uint32_t, double> gate_costs;
 
   double compute_simple_cost( const Ntk& net )
   {
@@ -217,7 +217,7 @@ private:
   };
 
   simple_cost_computer<Ntk> simp_cc;
-  const std::vector<std::pair<uint32_t, double>> splitters;
+  std::vector<std::pair<uint32_t, double>> splitters;
   double buffer_cost;
   uint32_t max_num_pis;
 

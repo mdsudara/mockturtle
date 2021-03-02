@@ -5,48 +5,41 @@
 #include "./aqfp_db.hpp"
 
 #include <limits>
-#include <map>
-#include <unordered_map>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 
 namespace mockturtle
 {
 
+/*! \brief Strategy for resynthesizing a node.
+ *
+ * cost_based  - choose the database entry that gives the minimum cost and break ties uing the level
+ * level_based - choose the database entry that gives the minimum level and break ties uing the cost
+ */
 enum class aqfp_node_resyn_strategy
 {
-  best_cost,
-  best_level
+  cost_based,
+  level_based
 };
 
+/*! \brief Parameters for aqfp_node_resyn. */
 struct aqfp_node_resyn_param
 {
-  std::string db_path;
-  std::map<uint32_t, double> splitters;
-  double buffer_cost;
-  aqfp_node_resyn_strategy strategy = aqfp_node_resyn_strategy::best_cost;
-  uint32_t verbose;
+  std::unordered_map<uint32_t, double> splitters;
+  aqfp_node_resyn_strategy strategy = aqfp_node_resyn_strategy::cost_based;
 };
 
-template<typename SrcNodeT, typename DestNodeT>
+/*! \brief This datastructure can be passed to `aqfp_resynthesis` as the node resynthesis algorithm. */
 struct aqfp_node_resyn
 {
-  aqfp_node_resyn( const aqfp_node_resyn_param& ps ) : params( ps ), db( ps.buffer_cost, ps.verbose )
+  aqfp_node_resyn(std::istream& db_file, const aqfp_node_resyn_param& ps ) : params( ps ), db( ps.splitters.at( 1u ) )
   {
-    std::ifstream db_file( ps.db_path );
-    assert( db_file.is_open() );
     db.load_db_from_file( db_file );
-    db_file.close();
   }
 
   template<typename NtkDest, typename TruthTable, typename LeavesIterator, typename LevelUpdateCallback, typename ResynPerformedCallback>
-  void operator()(
-      NtkDest& ntk_dest,
-      const TruthTable& f,
-      LeavesIterator leaves_begin,
-      LeavesIterator leaves_end,
-      LevelUpdateCallback&& level_update_callback,
-      ResynPerformedCallback&& resyn_performed_callback )
+  void operator()( NtkDest& ntk_dest, const TruthTable& f, LeavesIterator leaves_begin, LeavesIterator leaves_end, LevelUpdateCallback&& level_update_callback, ResynPerformedCallback&& resyn_performed_callback ) 
   {
     static_assert( std::is_invocable_v<LevelUpdateCallback, node<NtkDest>, uint32_t>, "LevelUpdateCallback must be callable with arguments of types (node<NtkDest>, level)" );
     static_assert( std::is_invocable_v<ResynPerformedCallback, signal<NtkDest>>, "ResynPerformedCallback must be callable with an argument of type signal<NtkDest>" );
@@ -56,128 +49,115 @@ struct aqfp_node_resyn
     std::vector<bool> leaf_no_splitters;
     for ( auto it = leaves_begin; it != leaves_end; it++ )
     {
-      auto leaf = std::get<0>(*it);
-      auto leaf_level = std::get<1>(*it);
+      auto leaf = std::get<0>( *it );
+      auto leaf_level = std::get<1>( *it );
 
       leaves.push_back( leaf );
       leaf_levels.push_back( leaf_level );
       leaf_no_splitters.push_back( ntk_dest.is_constant( ntk_dest.get_node( leaf ) ) || ntk_dest.is_ci( ntk_dest.get_node( leaf ) ) );
     }
 
+    // should not have more than 4 fanin nodes
+    assert( leaves.size() <= 4u );
+
+    // if less than 4 fanins, add dummy inputs
+    while ( leaves.size() < 4u )
+    {
+      leaves.push_back( ntk_dest.get_constant( false ) );
+      leaf_levels.push_back( 0u );
+      leaf_no_splitters.push_back( true );
+    }
+
+    auto tt = kitty::extend_to( f, 4u );
+
     auto new_n = ntk_dest.get_constant( false );
-    auto new_n_const_or_ci = false;
-    auto new_n_base_level = 0u;
-
-    if ( leaves.size() == 1u )
+    switch ( tt._bits[0] )
     {
-      /* Node n is a buffer, inverter, or essentially a constant. */
-      assert( f.num_vars() == 1u );
+    case 0x0000u:
+      new_n = ntk_dest.get_constant( false );
+      break;
+    case 0xffffu:
+      new_n = ntk_dest.get_constant( true );
+      break;
+    case 0x5555u:
+      new_n = !leaves[0];
+      break;
+    case 0xaaaau:
+      new_n = leaves[0];
+      break;
+    case 0x3333u:
+      new_n = !leaves[1];
+      break;
+    case 0xccccu:
+      new_n = leaves[1];
+      break;
+    case 0x0f0fu:
+      new_n = !leaves[2];
+      break;
+    case 0xf0f0u:
+      new_n = leaves[2];
+      break;
+    case 0x00ffu:
+      new_n = !leaves[3];
+      break;
+    case 0xff00u:
+      new_n = leaves[3];
+      break;
+    default:
+      auto [mig, depths, output_inv] = db.get_best_replacement(
+          tt._bits[0], leaf_levels, leaf_no_splitters,
+          [&]( const std::pair<double, uint32_t>& f, const std::pair<double, uint32_t>& s ) {
+            if ( params.strategy == aqfp_node_resyn_strategy::cost_based )
+            {
+              return ( f.first < s.first || ( f.first == s.first && f.second < s.second ) );
+            }
+            else
+            {
+              return ( f.second < s.second || ( f.second == s.second && f.first < s.first ) );
+            }
+          } );
 
-      switch ( f._bits[0] )
+      std::vector<signal<NtkDest>> sig_map( mig.size() );
+      std::vector<uint32_t> lev_map( mig.size() );
+
+      sig_map[0] = ntk_dest.get_constant( false );
+      lev_map[0] = 0u;
+      for ( auto i = 1u; i <= 4u; i++ )
       {
-      case 0x0u:
-        new_n = ntk_dest.get_constant( false );
-        new_n_const_or_ci = true;
-        break;
-      case 0x1u:
-        new_n = !leaves[0];
-        break;
-      case 0x2u:
-        new_n = leaves[0];
-        break;
-      case 0x3u:
-        new_n = ntk_dest.get_constant( true );
-        new_n_const_or_ci = true;
-        break;
-      default:
-        assert( false );
+        sig_map[i] = leaves[i - 1];
+        lev_map[i] = leaf_levels[i - 1];
       }
-
-      new_n_const_or_ci = ntk_dest.is_constant( ntk_dest.get_node( new_n ) ) || ntk_dest.is_ci( ntk_dest.get_node( new_n ) );
-
-//      new_n_base_level = new_n_const_or_ci ? 0u : edge_level[{ ntk_dest.get_node( leaves[0] ), n }] + 1;
-      new_n_base_level = new_n_const_or_ci ? 0u :  leaf_levels[0] + 1;
-    }
-    else
-    {
-      // should not have more than 4 fanin nodes
-      assert( leaves.size() <= 4u );
-
-      // if less than 4 fanins, add dummy inputs
-      while ( leaves.size() < 4u )
+      for ( auto i = 5u; i < mig.size(); i++ )
       {
-        leaves.push_back( ntk_dest.get_constant( false ) );
-        leaf_levels.push_back( 0u );
-        leaf_no_splitters.push_back( true );
-      }
-
-      auto tt = kitty::extend_to( f, 4u );
-
-      // std::vector<uint32_t> fanin_levels( 4u, 0u );
-      // std::vector<bool> fanin_const_or_ci( 4u, true );
-      // for ( auto i = 0u; i < fanin.size(); i++ )
-      // {
-      //   fanin_const_or_ci[i] = ;
-      //   fanin_levels[i] = ( fanin_const_or_ci[i] ? 0u : edge_level[{ ntk_dest.get_node( fanin[i] ), n }] );
-      // }
-
-      auto res = ( params.strategy == aqfp_node_resyn_strategy::best_cost )
-                     ? db.get_best_cost_replacement( tt._bits[0], leaf_levels, leaf_no_splitters )
-                     : db.get_best_level_replacement( tt._bits[0], leaf_levels, leaf_no_splitters );
-
-      auto& repnet = std::get<1>( res ).ntk;
-      auto perm = std::get<1>( res ).input_perm;
-      auto invcfg = std::get<1>( res ).inverter_config;
-
-      auto output_inv = std::get<1>( res ).output_inv;
-      auto gate_levels = std::get<1>( res ).gate_levels;
-      auto ind = 0u;
-      std::vector<signal<NtkDest>> sigmap( repnet.nodes.size() );
-      std::vector<uint32_t> levmap( repnet.nodes.size() );
-
-      for ( auto x : repnet.input_slots )
-      {
-        if ( x == repnet.zero_input )
+        std::vector<signal<NtkDest>> fanin;
+        for ( auto fin : mig[i] )
         {
-          sigmap[x] = ntk_dest.get_constant( false );
-          levmap[x] = 0u;
-          continue;
+          const auto fin_inv = ( ( fin & 1u ) == 1u );
+          const auto fin_id = ( fin >> 1 );
+          fanin.push_back( fin_inv ? !sig_map[fin_id] : sig_map[fin_id] );
         }
 
-        sigmap[x] = leaves[perm[ind]];
-        levmap[x] = leaf_levels[perm[ind]];
-        ind++;
-      }
+        sig_map[i] = ntk_dest.create_maj( fanin );
+        lev_map[i] = 0u;
 
-      for ( auto i = repnet.num_gates(); i > 0; i-- )
-      {
-        auto j = i - 1;
-        auto type = invcfg[j];
-        sigmap[j] = ntk_dest.create_maj(
-            ( type == 0 ) ? !sigmap[repnet.nodes[j][0]] : sigmap[repnet.nodes[j][0]],
-            ( type == 1 ) ? !sigmap[repnet.nodes[j][1]] : sigmap[repnet.nodes[j][1]],
-            ( type == 2 ) ? !sigmap[repnet.nodes[j][2]] : sigmap[repnet.nodes[j][2]] );
-
-        levmap[j] = 0u;
-        if ( ! (ntk_dest.is_constant( ntk_dest.get_node( sigmap[j] ) ) || ntk_dest.is_ci( ntk_dest.get_node( sigmap[j] )) )) {
-        for ( auto k = 0u; k < repnet.nodes[j].size(); k++ )
+        const auto node_i = ntk_dest.get_node( sig_map[i] );
+        if ( !( ntk_dest.is_constant( node_i ) || ntk_dest.is_ci( node_i ) ) )
         {
-          auto lev_dif = ( gate_levels[repnet.nodes[j][k]] > gate_levels[j] ) ? gate_levels[repnet.nodes[j][k]] - gate_levels[j] : 1u;
-          levmap[j] = std::max( levmap[j], levmap[repnet.nodes[j][k]] + lev_dif );
-        }
+          for ( auto fin : mig[i] )
+          {
+            const auto fin_id = ( fin >> 1u );
+            const auto lev_dif = ( depths[fin_id] > depths[i] ) ? depths[fin_id] - depths[i] : 1u;
+            lev_map[i] = std::max( lev_map[i], lev_map[fin_id] + lev_dif );
+          }
         }
 
-        // if we have already set the level, do not increase it
-        level_update_callback(ntk_dest.get_node(sigmap[j]), levmap[j]);
+        level_update_callback( ntk_dest.get_node( sig_map[i] ), lev_map[i] );
       }
 
-      new_n = output_inv ? !sigmap[0] : sigmap[0];
-      new_n_const_or_ci = ntk_dest.is_constant( ntk_dest.get_node( new_n ) ) || ntk_dest.is_ci( ntk_dest.get_node( new_n ) );
-      new_n_base_level = new_n_const_or_ci ? 0u : std::get<3>( res );
+      new_n = output_inv ? !sig_map[mig.size() - 1] : sig_map[mig.size() - 1];
     }
 
-    resyn_performed_callback( new_n);
-
+    resyn_performed_callback( new_n );
   }
 
 private:

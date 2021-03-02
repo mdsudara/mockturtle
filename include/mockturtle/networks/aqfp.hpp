@@ -709,7 +709,7 @@ public:
   {
     if ( is_constant( n ) || is_ci( n ) )
       return 0;
-    return 3;
+    return _storage->nodes[n].children.size();
   }
 
   uint32_t fanout_size( node const& n ) const
@@ -1129,9 +1129,7 @@ public:
     auto v2 = *begin++;
     auto v3 = *begin++;
 
-    auto result =
-
-        return ( ( v1 ^ c1.weight ) && ( v2 ^ c2.weight ) ) || ( ( v3 ^ c3.weight ) && ( v1 ^ c1.weight ) ) || ( ( v3 ^ c3.weight ) && ( v2 ^ c2.weight ) );
+    return ( ( v1 ^ c1.weight ) && ( v2 ^ c2.weight ) ) || ( ( v3 ^ c3.weight ) && ( v1 ^ c1.weight ) ) || ( ( v3 ^ c3.weight ) && ( v2 ^ c2.weight ) );
   }
 
   template<typename Iterator>

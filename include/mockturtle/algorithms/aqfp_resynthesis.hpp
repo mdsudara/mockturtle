@@ -27,7 +27,10 @@
   \file aqfp_resynthesis.hpp
   \brief Resynthesis of path balanced networks
 
-  \author Dewmini Sudara
+  \author Heinz Riener
+  \author Mathias Soeken
+  \author Max Austin
+  \author Dewmini Marakkalage 
 */
 
 #pragma once
@@ -53,11 +56,9 @@ namespace mockturtle
  */
 struct aqfp_resynthesis_params
 {
-  /*! \brief Be verbose. */
   bool verbose{ false };
-  double gate_cost = 6.0;
-  double buffer_cost = 2.0;
-  std::map<uint32_t, double> splitters = { { 4u, 2.0 } };
+  std::unordered_map<uint32_t, double> gate_costs;
+  std::unordered_map<uint32_t, double> splitters;
 };
 
 /*! \brief Statistics of aqfp_resynthesis.
@@ -106,7 +107,8 @@ public:
         node_resyn_fn( node_resyn_fn ),
         fanout_resyn_fn( fanout_resyn_fn ),
         ps( ps ),
-        st( st )
+        st( st ),
+        cc( ps.gate_costs, ps.splitters )
   {
   }
 
@@ -118,7 +120,6 @@ public:
     std::unordered_map<node<NtkDest>, uint32_t> level_of_node;
     std::map<std::pair<node<NtkSrc>, node<NtkSrc>>, uint32_t> level_for_fanout;
     uint32_t critical_po_level = 0;
-
 
     /* map constants */
     auto c0 = ntk_dest.get_constant( false );
@@ -176,7 +177,7 @@ public:
 
       auto performed_resyn = false;
       auto level_update_callback =
-          [&](const auto& n, uint32_t level ) {
+          [&]( const auto& n, uint32_t level ) {
             if ( !level_of_node.count( n ) )
             {
               level_of_node[n] = level;
@@ -184,7 +185,7 @@ public:
           };
 
       auto resyn_performed_callback =
-          [&](const auto&  f) {
+          [&]( const auto& f ) {
             node2new[n] = f;
 
             if constexpr ( has_has_name_v<NtkSrc> && has_get_name_v<NtkSrc> && has_set_name_v<NtkDest> )
@@ -205,15 +206,15 @@ public:
 
       /* synthesize fanout net of `n`*/
       auto fanout_node_callback = [&]( const auto& f, const auto& level ) {
-        level_for_fanout[{n, f}] = level; 
+        level_for_fanout[{ n, f }] = level;
       };
 
-      auto fanout_po_callback = [&]( const auto& index, const auto& level) {
-        (void) index;
-        critical_po_level = std::max(critical_po_level, level);
+      auto fanout_po_callback = [&]( const auto& index, const auto& level ) {
+        (void)index;
+        critical_po_level = std::max( critical_po_level, level );
       };
 
-      fanout_resyn_fn( ntk_topo, n, ntk_dest, node2new[n], level_of_node[ntk_dest.get_node(node2new[n])], fanout_node_callback, fanout_po_callback);
+      fanout_resyn_fn( ntk_topo, n, ntk_dest, node2new[n], level_of_node[ntk_dest.get_node( node2new[n] )], fanout_node_callback, fanout_po_callback );
     } );
 
     /* map primary outputs */
@@ -247,7 +248,7 @@ public:
       }
     } );
 
-    return { level_of_node, critical_po_level, compute_cost(level_of_node, critical_po_level) };
+    return { level_of_node, critical_po_level, cc( ntk_dest, level_of_node, critical_po_level ) };
   }
 
 private:
@@ -257,121 +258,7 @@ private:
   FanoutResynFn&& fanout_resyn_fn;
   aqfp_resynthesis_params const& ps;
   aqfp_resynthesis_stats& st;
-
-
-  std::map<std::vector<uint32_t>, double> rellev_cache;
-
-  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
-
-  /**
-   * \brief Compute the best splitter and buffer cost for a given relative level configuration 'config'.
-   */
-  double cost_for_config( const std::vector<uint32_t>& config )
-  {
-    if ( config.empty() )
-      return 0.0;
-
-    if ( config.size() == 1 )
-    {
-      if ( config[0] >= 1 )
-      {
-        return ( config[0] - 1 ) * ps.buffer_cost;
-      }
-      else
-      {
-        return IMPOSSIBLE;
-      }
-    }
-
-    if ( rellev_cache.count( config ) )
-    {
-      return rellev_cache[config];
-    }
-
-    auto result = IMPOSSIBLE;
-
-    for ( const auto& s : ps.splitters )
-    {
-      for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
-      {
-        auto sp_lev = config[config.size() - size] - 1;
-        if ( sp_lev == 0 )
-        {
-          continue;
-        }
-
-        auto temp = s.second;
-
-        for ( auto i = config.size() - size; i < config.size(); i++ )
-        {
-          temp += ( config[i] - config[config.size() - size] ) * ps.buffer_cost;
-        }
-
-        std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
-        new_config.push_back( sp_lev );
-        std::sort( new_config.begin(), new_config.end() );
-
-        temp += cost_for_config( new_config );
-
-        if ( temp < result )
-        {
-          result = temp;
-        }
-      }
-    }
-
-    return ( rellev_cache[config] = result );
-  }
-
-  template<typename NodeLevelT>
-  double compute_cost(const NodeLevelT& level_of_node, uint32_t critical_po_level)
-  {
-    fanout_view dest_fv{ ntk_dest };
-    auto gate_cost = 0.0;
-    auto fanout_net_cost = 0.0;
-
-    std::vector<node<NtkDest>> internal_nodes;
-    dest_fv.foreach_node( [&]( auto n ) {
-      if ( dest_fv.is_constant( n ) || dest_fv.is_pi( n ) )
-      {
-        return;
-      }
-
-      if ( n > 0u && dest_fv.is_maj( n ) )
-      {
-        internal_nodes.push_back( n );
-      }
-    } );
-
-    for ( auto n : internal_nodes )
-    {
-      gate_cost += ps.gate_cost;
-
-      std::vector<uint32_t> rellev;
-
-      dest_fv.foreach_fanout( n, [&]( auto fo ) {
-        assert( level_of_node.at(fo) > level_of_node.at(n));
-        rellev.push_back( level_of_node.at(fo) - level_of_node.at(n) );
-      } );
-
-      uint32_t pos = 0u;
-      while ( rellev.size() < dest_fv.fanout_size( n ) )
-      {
-        pos++;
-        rellev.push_back( critical_po_level - level_of_node.at(n) );
-      }
-
-      if ( rellev.size() > 1u || ( rellev.size() == 1u && rellev[0] > 0 ) )
-      {
-        std::sort( rellev.begin(), rellev.end() );
-        auto cst = cost_for_config( rellev );
-
-        fanout_net_cost += cst;
-      }
-    }
-
-    return gate_cost + fanout_net_cost;
-  }
+  aqfp_cost cc;
 };
 
 } /* namespace detail */
@@ -383,7 +270,7 @@ aqfp_resynthesis_result<NtkDest> aqfp_resynthesis(
     NtkSrc const& ntk_src,
     NodeResynFn&& node_resyn_fn,
     FanoutResynFn&& fanout_resyn_fn,
-    aqfp_resynthesis_params const& ps = { false, 6.0, 2.0, { { 4u, 2.0 } } },
+    aqfp_resynthesis_params const& ps = { false, { { 3u, 6.0 }, { 5u, 10.0 } }, { { 1u, 2.0 }, { 4u, 2.0 } } },
     aqfp_resynthesis_stats* pst = nullptr )
 {
   static_assert( is_network_type_v<NtkSrc>, "NtkSrc is not a network type" );
