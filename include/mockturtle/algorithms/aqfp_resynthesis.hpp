@@ -83,9 +83,8 @@ struct aqfp_resynthesis_stats
 template<typename NtkDest>
 struct aqfp_resynthesis_result
 {
-  std::unordered_map<node<NtkDest>, uint32_t> level_of_node;
-  uint32_t critical_po_level = 0u;
-  double total_cost = 0.0;
+  std::unordered_map<node<NtkDest>, uint32_t> node_level;
+  uint32_t po_level = 0u;
 };
 
 namespace detail
@@ -107,8 +106,7 @@ public:
         node_resyn_fn( node_resyn_fn ),
         fanout_resyn_fn( fanout_resyn_fn ),
         ps( ps ),
-        st( st ),
-        cc( ps.gate_costs, ps.splitters )
+        st( st )
   {
   }
 
@@ -248,7 +246,7 @@ public:
       }
     } );
 
-    return { level_of_node, critical_po_level, cc( ntk_dest, level_of_node, critical_po_level ) };
+    return { level_of_node, critical_po_level };
   }
 
 private:
@@ -258,7 +256,6 @@ private:
   FanoutResynFn&& fanout_resyn_fn;
   aqfp_resynthesis_params const& ps;
   aqfp_resynthesis_stats& st;
-  aqfp_cost cc;
 };
 
 } /* namespace detail */

@@ -1,6 +1,6 @@
 #pragma once
 
-#include <numeric>
+#include <limits>
 #include <unordered_map>
 #include <vector>
 
@@ -11,6 +11,89 @@
 
 namespace mockturtle
 {
+
+class fanout_cost_computer
+{
+public:
+  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
+
+  fanout_cost_computer( const std::unordered_map<uint32_t, double>& splitters ) : buffer_cost( splitters.at( 1u ) ), splitters( remove_buffer( splitters ) )
+  {
+  }
+
+  double operator()( const std::vector<uint32_t>& config )
+  {
+    return cost_for_config( config );
+  }
+
+private:
+  double buffer_cost;
+  std::unordered_map<uint32_t, double> splitters;
+  std::unordered_map<std::vector<uint32_t>, double> cache;
+
+  static std::unordered_map<uint32_t, double> remove_buffer( std::unordered_map<uint32_t, double> splitters )
+  {
+    splitters.erase( 1u );
+    return splitters;
+  }
+
+  /**
+   * \brief Compute the best splitter and buffer cost for a given relative level configuration of the fanouts.
+   */
+  double cost_for_config( const std::vector<uint32_t> config )
+  {
+    if ( config.size() == 1 )
+    {
+      if ( config[0] >= 1 )
+      {
+        return ( config[0] - 1 ) * buffer_cost;
+      }
+      else
+      {
+        return IMPOSSIBLE;
+      }
+    }
+
+    if ( cache.count( config ) )
+    {
+      return cache[config];
+    }
+
+    auto result = IMPOSSIBLE;
+
+    for ( const auto& s : splitters )
+    {
+      for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
+      {
+        auto sp_lev = config[config.size() - size] - 1;
+        if ( sp_lev == 0 )
+        {
+          continue;
+        }
+
+        auto temp = s.second;
+
+        for ( auto i = config.size() - size; i < config.size(); i++ )
+        {
+          temp += ( config[i] - config[config.size() - size] ) * buffer_cost;
+        }
+
+        std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
+        new_config.push_back( sp_lev );
+        std::sort( new_config.begin(), new_config.end() );
+
+        temp += cost_for_config( new_config );
+
+        if ( temp < result )
+        {
+          result = temp;
+        }
+      }
+    }
+
+    return ( cache[config] = result );
+  }
+};
 
 template<typename Ntk>
 class simple_cost_computer
@@ -52,16 +135,13 @@ private:
 template<typename Ntk>
 class aqfp_cost_computer
 {
+public:
   using level_config_t = uint64_t;
 
   static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
 
-public:
-  aqfp_cost_computer(
-      const std::unordered_map<uint32_t, double>& gate_costs,
-      const std::vector<std::pair<uint32_t, double>>& splitters,
-      double buffer_cost,
-      uint32_t max_num_pis ) : simp_cc( gate_costs ), splitters( splitters ), buffer_cost( buffer_cost ), max_num_pis( max_num_pis ) {}
+  aqfp_cost_computer( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters, uint32_t max_num_pis )
+      : simp_cc( gate_costs ), fanout_cc(splitters), splitters( splitters ), buffer_cost( splitters.at( 1u ) ), max_num_pis( max_num_pis ) {}
 
   double operator()( Ntk& net )
   {
@@ -119,10 +199,9 @@ public:
     return ( orig_net.computed_cost = cost );
   }
 
-
   std::tuple<double, std::vector<uint32_t>> aqfp_cost_with_fixed_input_levels( Ntk& orig_net, const std::vector<uint32_t>& input_levels, const std::vector<bool>& const_or_pi )
   {
-    (void) const_or_pi;
+    (void)const_or_pi;
     cost_context ctx( orig_net );
 
     compute_fanouts( ctx.net, ctx.fanout );
@@ -131,7 +210,7 @@ public:
 
     uint32_t ind = 0u;
     // for (auto x : ctx.net.input_slots) {
-    //   if (x == ctx.net.zero_input) continue; 
+    //   if (x == ctx.net.zero_input) continue;
     //   if (const_or_pi[ind++]) {
     //     ctx.fanout[x].clear();
     //   }
@@ -142,19 +221,19 @@ public:
     ind = 0u;
     for ( auto f : ctx.net.input_slots )
     {
-        if ( f != ctx.net.zero_input )
-        {
-          ctx.minlev[f] = input_levels[ind++];
-        }
+      if ( f != ctx.net.zero_input )
+      {
+        ctx.minlev[f] = input_levels[ind++];
+      }
     }
 
     // check different level configurations for the other gates and compute the cost for buffers and splitters
-    auto [cost, levels] = compute_best_cost_and_levels( ctx, 1u, 0.0);
+    auto [cost, levels] = compute_best_cost_and_levels( ctx, 1u, 0.0 );
 
     // add the gate costs
     cost += simp_cc( ctx.net );
 
-    return {cost, levels};
+    return { cost, levels };
   }
 
   /**
@@ -217,7 +296,8 @@ private:
   };
 
   simple_cost_computer<Ntk> simp_cc;
-  std::vector<std::pair<uint32_t, double>> splitters;
+  fanout_cost_computer fanout_cc;
+  std::unordered_map<uint32_t, double> splitters;
   double buffer_cost;
   uint32_t max_num_pis;
 
@@ -382,63 +462,62 @@ private:
     }
   }
 
+  // /**
+  //  * \brief Compute the best splitter and buffer cost for a given relative level configuration 'config'.
+  //  */
+  // double cost_for_config( cost_context& ctx, const std::vector<uint32_t> config )
+  // {
+  //   if ( config.size() == 1 )
+  //   {
+  //     if ( config[0] >= 1 )
+  //     {
+  //       return ( config[0] - 1 ) * buffer_cost;
+  //     }
+  //     else
+  //     {
+  //       return IMPOSSIBLE;
+  //     }
+  //   }
 
-  /**
-   * \brief Compute the best splitter and buffer cost for a given relative level configuration 'config'.
-   */
-  double cost_for_config( cost_context& ctx, const std::vector<uint32_t> config )
-  {
-    if ( config.size() == 1 )
-    {
-      if ( config[0] >= 1 )
-      {
-        return ( config[0] - 1 ) * buffer_cost;
-      }
-      else
-      {
-        return IMPOSSIBLE;
-      }
-    }
+  //   if ( ctx.rellev_cache.count( config ) )
+  //   {
+  //     return ctx.rellev_cache[config];
+  //   }
 
-    if ( ctx.rellev_cache.count( config ) )
-    {
-      return ctx.rellev_cache[config];
-    }
+  //   auto result = IMPOSSIBLE;
 
-    auto result = IMPOSSIBLE;
+  //   for ( const auto& s : splitters )
+  //   {
+  //     for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
+  //     {
+  //       auto sp_lev = config[config.size() - size] - 1;
+  //       if ( sp_lev == 0 )
+  //       {
+  //         continue;
+  //       }
 
-    for ( const auto& s : splitters )
-    {
-      for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
-      {
-        auto sp_lev = config[config.size() - size] - 1;
-        if ( sp_lev == 0 )
-        {
-          continue;
-        }
+  //       auto temp = s.second;
 
-        auto temp = s.second;
+  //       for ( auto i = config.size() - size; i < config.size(); i++ )
+  //       {
+  //         temp += ( config[i] - config[config.size() - size] ) * buffer_cost;
+  //       }
 
-        for ( auto i = config.size() - size; i < config.size(); i++ )
-        {
-          temp += ( config[i] - config[config.size() - size] ) * buffer_cost;
-        }
+  //       std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
+  //       new_config.push_back( sp_lev );
+  //       std::sort( new_config.begin(), new_config.end() );
 
-        std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
-        new_config.push_back( sp_lev );
-        std::sort( new_config.begin(), new_config.end() );
+  //       temp += cost_for_config( ctx, new_config );
 
-        temp += cost_for_config( ctx, new_config );
+  //       if ( temp < result )
+  //       {
+  //         result = temp;
+  //       }
+  //     }
+  //   }
 
-        if ( temp < result )
-        {
-          result = temp;
-        }
-      }
-    }
-
-    return ( ctx.rellev_cache[config] = result );
-  }
+  //   return ( ctx.rellev_cache[config] = result );
+  // }
 
   /**
    * \brief Find the locally optimal fanout-net for a node if it in level 'lev', if its fanouts are
@@ -453,7 +532,8 @@ private:
     }
     std::sort( rellev.begin(), rellev.end() );
 
-    return cost_for_config( ctx, rellev );
+    //return cost_for_config( ctx, rellev );
+    return fanout_cc(rellev);
   }
 
   /**
@@ -476,15 +556,16 @@ private:
         // k (sp.size() - 1) + 1 >= t ===> k >= (t - 1) / (sp.size() - 1)
 
         // we cannot say anything about the buffer requirement not knowning the actual inputs
+        auto max_splitter = std::max_element( splitters.begin(), splitters.end(), []( auto f, auto s ) { return f.first < s.first; } );
 
-        return cost_so_far + ( ( t - 1 ) / ( splitters.back().first - 1 ) ) * splitters.back().second;
+        return cost_so_far + ( ( t - 1 ) / ( max_splitter->first - 1 ) ) * max_splitter->second;
       }
 
       // net is a DAG, so compute fanout-net costs for primary inputs
 
       for ( auto f : ctx.net.input_slots )
       {
-        if ( (f == ctx.net.zero_input) || ctx.fanout[f].empty())
+        if ( ( f == ctx.net.zero_input ) || ctx.fanout[f].empty() )
         {
           continue;
         }
@@ -519,7 +600,6 @@ private:
     return result;
   }
 
-
   /**
    * \brief Similar to compute_best_cost, but also return the corresponding levels that achieve the minimum cost.
    */
@@ -529,7 +609,7 @@ private:
     {
       for ( auto f : ctx.net.input_slots )
       {
-        if ( (f == ctx.net.zero_input) || ctx.fanout[f].empty())
+        if ( ( f == ctx.net.zero_input ) || ctx.fanout[f].empty() )
         {
           continue;
         }
@@ -539,11 +619,11 @@ private:
 
         if ( cost_so_far >= IMPOSSIBLE )
         {
-          return {IMPOSSIBLE, {}};
+          return { IMPOSSIBLE, {} };
         }
       }
 
-      return {cost_so_far, ctx.curlev};
+      return { cost_so_far, ctx.curlev };
     }
 
     double res_cost = IMPOSSIBLE;
@@ -564,7 +644,7 @@ private:
       }
     }
 
-    return {res_cost, res_lev};
+    return { res_cost, res_lev };
   }
 
   /**
@@ -584,7 +664,7 @@ private:
         }
 
         // lconfig = ( lconfig << 8 ) + ctx.curlev[f];
-        lconfig |= (ctx.curlev[f] << (8 * ind));
+        lconfig |= ( ctx.curlev[f] << ( 8 * ind ) );
         ind++;
       }
 

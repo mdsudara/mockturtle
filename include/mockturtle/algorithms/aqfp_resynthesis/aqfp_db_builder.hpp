@@ -15,19 +15,23 @@
 namespace mockturtle
 {
 
-template<typename Ntk, int N = 4>
+template<typename Ntk = aqfp_logical_network_t<int>, int N = 4>
 class aqfp_db_builder
 {
-  using db_type = aqfp_logical_network_db<Ntk, N>;
+  using db_type = aqfp_db<Ntk, N>;
   using replacement = typename db_type::replacement;
 
 public:
-  aqfp_db_builder( double buffer_cost, uint32_t verbose = 0u ) : buffer_cost( buffer_cost ), db( 1ul << ( 1ul << N ) ), verbose( verbose ), cc( { { 3u, 6.0 } }, { { 4u, 2.0 } }, buffer_cost, 4u ) {}
+  aqfp_db_builder( 
+    const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
+      const std::unordered_map<uint32_t, double>& splitters = { { 1u, 2.0 }, { 4u, 2.0 } } 
+   ) :  gate_costs(gate_costs), splitters(splitters), cc( gate_costs, splitters, 4u ) {}
 
-  db_type build() {
-    return db_type(buffer_cost, db);
+  db_type build()
+  {
+    return db_type(db, gate_costs, splitters );
   }
-  
+
   /**
    * Update the database with a rusult for network `net`.
    */
@@ -110,7 +114,7 @@ public:
             double extra_buff_cost = 0;
             for ( auto j = 0; j < N; j++ )
             {
-              extra_buff_cost += buffer_cost * ( level_of_input( it->first, j ) - level_of_input( jt->first, j ) );
+              extra_buff_cost += splitters.at(1u) * ( level_of_input( it->first, j ) - level_of_input( jt->first, j ) );
             }
             if ( extra_buff_cost + jt->second.cost <= it->second.cost )
             {
@@ -211,12 +215,11 @@ public:
   }
 
 private:
-  double buffer_cost;
-  std::unordered_map<uint64_t, std::unordered_map<uint64_t, replacement>> db;
-  uint32_t verbose;
-  npn_cache<N> npndb;
+  std::unordered_map<uint32_t, double> gate_costs;
+  std::unordered_map<uint32_t, double> splitters;
+  std::unordered_map<uint64_t, std::map<uint64_t, replacement>> db;
   mockturtle::aqfp_cost_computer<Ntk> cc;
-  
+  npn_cache<N> npndb;
 
   /** 
    * get all functions synthesizable from `net` if input slots are assigned the truthtables in `input_tt`.
@@ -247,7 +250,6 @@ private:
         tt[i] = input_tt[input_ind++];
       }
     }
-
 
     for ( auto inv_config = 0ul; inv_config < ( 1ul << ( 2 * net.num_gates() ) ); inv_config++ )
     {

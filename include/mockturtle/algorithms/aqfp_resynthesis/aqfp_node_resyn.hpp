@@ -3,6 +3,7 @@
 #include "../../traits.hpp"
 
 #include "./aqfp_db.hpp"
+#include "./aqfp_db_builder.hpp"
 
 #include <limits>
 #include <type_traits>
@@ -33,9 +34,9 @@ struct aqfp_node_resyn_param
 /*! \brief This datastructure can be passed to `aqfp_resynthesis` as the node resynthesis algorithm. */
 struct aqfp_node_resyn
 {
-  aqfp_node_resyn(std::istream& db_file, const aqfp_node_resyn_param& ps ) : params( ps ), db( ps.splitters.at( 1u ) )
+  aqfp_node_resyn(aqfp_db<>& db, const aqfp_node_resyn_param& ps ) : params( ps ), db( db )
   {
-    db.load_db_from_file( db_file );
+
   }
 
   template<typename NtkDest, typename TruthTable, typename LeavesIterator, typename LevelUpdateCallback, typename ResynPerformedCallback>
@@ -162,7 +163,7 @@ struct aqfp_node_resyn
 
 private:
   aqfp_node_resyn_param params;
-  aqfp_logical_network_db<aqfp_logical_network_t<int>, 4u> db;
+  aqfp_db<> db;
 };
 
 } // namespace mockturtle

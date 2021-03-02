@@ -1,138 +1,74 @@
-#include <chrono>
 #include <fstream>
-#include <future>
 #include <iostream>
-#include <map>
-#include <mutex>
-#include <queue>
-#include <sstream>
-#include <thread>
 #include <unordered_map>
 #include <vector>
 
 #include <fmt/format.h>
-
 #include <lorina/lorina.hpp>
-#include <mockturtle/generators/majority.hpp>
+
 #include <mockturtle/io/blif_reader.hpp>
 #include <mockturtle/io/verilog_reader.hpp>
 #include <mockturtle/io/write_blif.hpp>
+
 #include <mockturtle/networks/aqfp.hpp>
+#include <mockturtle/networks/klut.hpp>
 #include <mockturtle/networks/mig.hpp>
+
 #include <mockturtle/views/depth_view.hpp>
 #include <mockturtle/views/fanout_limit_view.hpp>
 #include <mockturtle/views/fanout_view.hpp>
 
-#include <mockturtle/algorithms/cleanup.hpp>
-
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db_builder.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/aqfp_fanout_resyn.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/aqfp_node_resyn.hpp>
-#include <mockturtle/algorithms/aqfp_resynthesis/dag.hpp>
 
 #include <mockturtle/algorithms/aqfp_resynthesis.hpp>
-#include <mockturtle/algorithms/mig_algebraic_rewriting.hpp>
-#include <mockturtle/algorithms/mig_algebraic_rewriting_splitters.hpp>
-#include <mockturtle/algorithms/mig_resub.hpp>
-#include <mockturtle/algorithms/mig_resub_splitters.hpp>
-#include <mockturtle/algorithms/node_resynthesis.hpp>
-#include <mockturtle/algorithms/node_resynthesis/akers.hpp>
-#include <mockturtle/algorithms/node_resynthesis/exact.hpp>
-#include <mockturtle/algorithms/node_resynthesis/mig_npn.hpp>
-#include <mockturtle/algorithms/refactoring.hpp>
-#include <mockturtle/views/fanout_limit_view.hpp>
 
 #include "../experiments/experiments.hpp"
 
 template<typename Result>
 bool has_better_cost( Result& current, Result& previous )
 {
-  if ( current.total_cost < previous.total_cost )
+  if ( current.first < previous.first )
     return true;
 
-  if ( current.total_cost > previous.total_cost )
+  if ( current.first > previous.first )
     return false;
 
-  return current.critical_po_level < previous.critical_po_level;
+  return current.second < previous.second;
 }
 
 template<typename Result>
 bool has_better_level( Result& current, Result& previous )
 {
-  if ( current.critical_po_level < previous.critical_po_level )
+  if ( current.second < previous.second )
     return true;
 
-  if ( current.critical_po_level > previous.critical_po_level )
+  if ( current.second > previous.second )
     return false;
 
-  return current.total_cost < previous.total_cost;
+  return current.first < previous.first;
 }
 
-template<class Ntk>
-struct jj_cost
-{
-  uint32_t operator()( Ntk const& ntk, mockturtle::node<Ntk> const& n ) const
-  {
-    if ( ntk.is_pi( n ) || ntk.is_constant( n ) )
-      return 0;
-
-    return 6 + 2 * ( ( ntk.fanout_size( n ) + 1 ) / 3 );
-  }
-};
-
-template<class Ntk>
-struct fanout_cost_depth_local
-{
-  uint32_t operator()( Ntk const& ntk, mockturtle::node<Ntk> const& n ) const
-  {
-    uint32_t cost = 0;
-    if ( ntk.is_pi( n ) )
-      cost = 0;
-    else if ( ntk.fanout_size( n ) == 1 )
-      cost = 1;
-    else if ( ( ntk.fanout_size( n ) > 1 ) && ( ( ntk.fanout_size( n ) < 5 ) ) )
-      cost = 2;
-    else if ( ( ntk.fanout_size( n ) > 4 ) && ( ntk.fanout_size( n ) < 17 ) )
-      cost = 3;
-    else
-      cost = 4;
-    return cost;
-  }
-};
-
 std::vector<std::string> mcnc = {
-    // "9symml.v",
-    // "Z9sym.v",
-    // "alu4.v",
-    // "apex6.v",
-    // "c17.v",
-    // "c2670.v",
-    // "c3540.v",
-    // "c7552.v",
-    // "ex7.v",
-    // "in7.v",
-    // "x4.v",
-    // "x9dn.v",
-    // "xparc.v",
-
     "5xp1.v",
     "c1908.v",
     "c432.v",
-    "c5315.v",
-    "c880.v",
-
-    "chkn.v",
-    "count.v",
-    "dist.v",
-    "in5.v",
-    "in6.v",
-    "k2.v",
-    "m3.v",
-    "max512.v",
-    "misex3.v",
-    "mlp4.v",
-    "prom2.v",
-    "sqr6.v",
-    "x1dn.v",
+    // "c5315.v",
+    // "c880.v",
+    // "chkn.v",
+    // "count.v",
+    // "dist.v",
+    // "in5.v",
+    // "in6.v",
+    // "k2.v",
+    // "m3.v",
+    // "max512.v",
+    // "misex3.v",
+    // "mlp4.v",
+    // "prom2.v",
+    // "sqr6.v",
+    // "x1dn.v",
 };
 
 template<class Ntk>
@@ -162,10 +98,10 @@ bool abc_cec_aqfp( Ntk const& ntk, std::string const& benchmark )
 }
 
 template<typename Ntk>
-mockturtle::klut_network lut_map_old( Ntk const& ntk, std::string design, std::string command, uint32_t k = 4 )
+mockturtle::klut_network lut_map( Ntk const& ntk, uint32_t k = 4 )
 {
-  std::string tempfile1 = design + ".temp1old." + command + ".blif";
-  std::string tempfile2 = design + ".temp2old." + command + ".blif";
+  std::string tempfile1 = "/tmp/temp1.blif";
+  std::string tempfile2 = "/tmp/temp2.blif";
 
   mockturtle::write_blif( ntk, tempfile1 );
   system( fmt::format( "abc -q \"{}; if -K {}; write_blif {}\" >> /dev/null 2>&1", tempfile1, k, tempfile2 ).c_str() );
@@ -183,32 +119,10 @@ mockturtle::klut_network lut_map_old( Ntk const& ntk, std::string design, std::s
   return klut;
 }
 
-template<typename Ntk>
-mockturtle::klut_network lut_map_new( Ntk const& ntk, std::string design, std::string command, uint32_t k = 4 )
+template<typename NodeResyn, typename FanoutResyn, typename CostFn>
+void experiment_aqfp_exact_syn( const std::string& strategy, NodeResyn& node_resyn, FanoutResyn& fanout_resyn, CostFn&& cost_fn, const std::vector<std::string>& benchmarks )
 {
-  std::string tempfile1 = design + ".temp1new." + command + ".blif";
-  std::string tempfile2 = design + ".temp2new." + command + ".blif";
-
-  mockturtle::write_blif( ntk, tempfile1 );
-  system( fmt::format( "abc -q \"{}; &get; &if -K {}; &put; write_blif {}\" >> /dev/null 2>&1 ", tempfile1, k, tempfile2 ).c_str() );
-
-  mockturtle::klut_network klut;
-  if ( lorina::read_blif( tempfile2, mockturtle::blif_reader( klut ) ) != lorina::return_code::success )
-  {
-    std::cout << "FATAL NEW LUT MAP - Reading mapped network failed!" << std::endl;
-    std::abort();
-    return klut;
-  }
-
-  system( fmt::format( "rm {}", tempfile1 ).c_str() );
-  system( fmt::format( "rm {}", tempfile2 ).c_str() );
-  return klut;
-}
-
-template<typename NodeResyn, typename FanoutResyn>
-void experiment_aqfp_exact_syn_only( NodeResyn& node_resyn,  FanoutResyn& fanout_resyn, const std::vector<std::string>& benchmarks, const std::string& experiment_name, const std::string& strategy )
-{
-  experiments::experiment< std::string, uint32_t, double, uint32_t, double> exp( experiment_name, "benchmark", "JJ Depth", " #JJ", "OPT JJ Depth", "OPT #JJ" );
+  experiments::experiment<std::string, uint32_t, double, uint32_t, double> exp( "aqfp_resynthesis_" + strategy + "_based", "benchmark", "#JJ", "JJ Depth", "OPT #JJ", "OPT JJ Depth" );
 
   for ( auto b : benchmarks )
   {
@@ -220,44 +134,39 @@ void experiment_aqfp_exact_syn_only( NodeResyn& node_resyn,  FanoutResyn& fanout
     lorina::read_verilog( benchmark, mockturtle::verilog_reader( mig ) );
     fmt::print( "\tpi: {:4d} po: {:4d} size: {:6d}\n", mig.num_pis(), mig.num_pos(), mig.num_gates() );
 
-    /* 1. Directly map to AQFP */
-    mockturtle::klut_network klut_orig = lut_map_old( mig, benchmark, "temp", 4 );
-    mockturtle::aqfp_network aqfp_net_1;
-    auto res_orig = mockturtle::aqfp_resynthesis( aqfp_net_1, klut_orig, node_resyn, fanout_resyn );
+    /* 1. Apply AQFP resynthesis once */
+    mockturtle::klut_network klut_orig = lut_map( mig, 4 );
 
-    /* 2. Repeatedly apply exact AQFP synthesis */
     mockturtle::aqfp_network opt_aqfp;
-    auto res_opt = mockturtle::aqfp_resynthesis( opt_aqfp, klut_orig, node_resyn, fanout_resyn );
+    auto res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_orig, node_resyn, fanout_resyn );
+    std::pair<double, uint32_t> res_orig = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
 
+    /* 2. Repeatedly apply AQFP resynthesis */
+    auto res_opt = res_orig;
     for ( auto i = 2u; i <= 10u; i++ )
     {
-      auto klut_opt = lut_map_old( opt_aqfp, benchmark, "temp", 4 );
+      auto klut_opt = lut_map( opt_aqfp, 4 );
 
       opt_aqfp = mockturtle::aqfp_network();
-      auto res_opt1 = mockturtle::aqfp_resynthesis( opt_aqfp, klut_opt, node_resyn, fanout_resyn );
+      res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_opt, node_resyn, fanout_resyn );
+      std::pair<double, uint32_t> res_temp = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
 
-      if ( strategy == "cost" && has_better_cost( res_opt1, res_opt ) )
+      if ( strategy == "cost" && has_better_cost( res_temp, res_opt ) )
       {
-        res_opt = res_opt1;
+        res_opt = res_temp;
       }
-      if ( strategy == "level" && has_better_level( res_opt1, res_opt ) )
+      if ( strategy == "level" && has_better_level( res_temp, res_opt ) )
       {
-        res_opt = res_opt1;
+        res_opt = res_temp;
       }
     }
 
     assert( abc_cec_aqfp( opt_aqfp, benchmark ) );
 
-    exp( b,
-         res_orig.critical_po_level, res_orig.total_cost,
-         res_opt.critical_po_level, res_opt.total_cost );
+    exp( b, res_orig.first, res_orig.second, res_opt.first, res_opt.second );
   }
 
-  exp.save( experiment_name );
-
-  fmt::print( "Experiment details\n"
-              "\tAQFP exact-syn on original network\n"
-              "\tAQFP exact-syn best out of 10 iterations\n" );
+  exp.save();
   exp.table();
 }
 
@@ -266,27 +175,30 @@ int main( int argc, char** argv )
   (void)argc;
   (void)argv;
 
-  std::string method( argv[1] );
+  std::string method( argc > 1 ? argv[1] : "cost" );
+  assert( method == "cost" || method == "level" );
+
+  std::unordered_map<uint32_t, double> gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } };
+  std::unordered_map<uint32_t, double> splitters = { { 1u, 2.0 }, { 4u, 2.0 } };
+
+  mockturtle::aqfp_db_builder<> builder( gate_costs, splitters );
 
   std::ifstream db_file( "aqfp_db.txt" );
   assert( db_file.is_open() );
-
-  mockturtle::aqfp_fanout_resyn fanout_resyn(4u);
-
-  if ( method == "cost" )
-  {
-    mockturtle::aqfp_node_resyn_param ps_cost{ { { 1u, 2.0 }, { 4u, 2.0 } }, mockturtle::aqfp_node_resyn_strategy::cost_based };
-    mockturtle::aqfp_node_resyn node_resyn( db_file, ps_cost );
-    experiment_aqfp_exact_syn_only( node_resyn, fanout_resyn, mcnc, "aqfp_resynthesis_cost_based", method );
-  }
-  else if ( method == "level" )
-  {
-    mockturtle::aqfp_node_resyn_param ps_level{ { { 1u, 2.0 }, { 4u, 2.0 } }, mockturtle::aqfp_node_resyn_strategy::level_based };
-    mockturtle::aqfp_node_resyn node_resyn( db_file, ps_level );
-    experiment_aqfp_exact_syn_only( node_resyn, fanout_resyn, mcnc, "aqfp_resynthesis_level_based", method );
-  }
-
+  builder.load_db_from_file( db_file );
   db_file.close();
+
+  auto db = builder.build();
+
+  mockturtle::aqfp_network_cost cost_fn( gate_costs, splitters );
+
+  auto strategy = ( method == "cost" ) ? mockturtle::aqfp_node_resyn_strategy::cost_based : mockturtle::aqfp_node_resyn_strategy::level_based;
+  mockturtle::aqfp_node_resyn_param ps{ splitters, strategy };
+  mockturtle::aqfp_node_resyn node_resyn( db, ps );
+
+  mockturtle::aqfp_fanout_resyn fanout_resyn( 4u );
+
+  experiment_aqfp_exact_syn( method, node_resyn, fanout_resyn, cost_fn, mcnc );
 
   return 0;
 }
