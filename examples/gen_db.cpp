@@ -9,13 +9,13 @@
 #include <thread>
 #include <vector>
 
-#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db_builder.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/dag_cost.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/gen_dag.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/generate_db.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/sat.hpp>
 
-void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, const std::map<uint32_t, uint32_t>& max_gates_of_fanin = { { 3u, 7u } }, uint32_t max_gates = 7u, uint32_t max_num_in = 5u, uint32_t max_levels = 7u, bool count_only = false)
+void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, const std::map<uint32_t, uint32_t>& max_gates_of_fanin = { { 3u, 7u } }, uint32_t max_gates = 7u, uint32_t max_num_in = 5u, uint32_t max_levels = 7u, bool count_only = false )
 {
   // std::vector<uint32_t> allowed_num_fanins = { 3u };                // will use only fanin 3 gates
   // std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 7u } }; // allow at most 7 3-input gates and 0 5-input gates
@@ -37,7 +37,7 @@ void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, 
 void generate_cost_db()
 {
   using Ntk = mockturtle::aqfp_logical_network_t<int>;
-  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 6.0 } }, { { 4u, 2.0 } }, 2.0, 4u );
+  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 6.0 } }, { { 1u, 2.0 }, { 4u, 2.0 } }, 4u );
   mockturtle::cost_all_dags( std::cin, std::cout, cc, 1u );
 }
 
@@ -110,7 +110,7 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
   std::string dag;
   auto dag_count = 0u;
 
-  mockturtle::aqfp_logical_network_db<mockturtle::aqfp_logical_network_t<int>, 4u> db( 2.0, 1u );
+  mockturtle::aqfp_db_builder<> db( { { 3u, 6.0 }, { 5u, 10.0 } }, { { 1u, 2.0 }, { 4u, 2.0 } } );
 
   while ( std::getline( d, dag ) )
   {
@@ -184,21 +184,25 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
   o.close();
 }
 
-std::vector<uint32_t> string_to_uint_vec(std::string str) {
-  std::stringstream ss(str);
+std::vector<uint32_t> string_to_uint_vec( std::string str )
+{
+  std::stringstream ss( str );
   std::vector<uint32_t> res;
   uint32_t temp;
-  while(ss >> temp) {
-    res.push_back(temp);
+  while ( ss >> temp )
+  {
+    res.push_back( temp );
   }
   return res;
 }
 
-std::map<uint32_t, uint32_t> string_to_uint_uint_map(std::string str) {
-  std::stringstream ss(str);
+std::map<uint32_t, uint32_t> string_to_uint_uint_map( std::string str )
+{
+  std::stringstream ss( str );
   std::map<uint32_t, uint32_t> res;
   uint32_t t1, t2;
-  while(ss >> t1 >> t2) {
+  while ( ss >> t1 >> t2 )
+  {
     res[t1] = t2;
   }
   return res;
@@ -211,24 +215,26 @@ int main( int argc, char** argv )
 
   if ( argc < 2 )
   {
-    std::cerr << fmt::format( "Not enough arguments. Usage: {} cmd [opt]\n", std::string(argv[0]) );
+    std::cerr << fmt::format( "Not enough arguments. Usage: {} cmd [opt]\n", std::string( argv[0] ) );
     return 0;
   }
 
   std::string cmd( argv[1] );
   if ( cmd == "gd" )
   {
-    if (argc < 3) {
+    if ( argc < 3 )
+    {
       generate_dag_db();
-    } else {
-      auto allowed_num_fanins = string_to_uint_vec(std::string(argv[2]));
-      auto max_gates_of_fanin = string_to_uint_uint_map(std::string(argv[3]));
-      auto max_gates = std::stoul(std::string(argv[4]));
-      auto max_num_in = std::stoul(std::string(argv[5]));
-      auto max_levels = std::stoul(std::string(argv[6]));
-      generate_dag_db(allowed_num_fanins, max_gates_of_fanin, max_gates, max_num_in, max_levels, false);
     }
-
+    else
+    {
+      auto allowed_num_fanins = string_to_uint_vec( std::string( argv[2] ) );
+      auto max_gates_of_fanin = string_to_uint_uint_map( std::string( argv[3] ) );
+      auto max_gates = std::stoul( std::string( argv[4] ) );
+      auto max_num_in = std::stoul( std::string( argv[5] ) );
+      auto max_levels = std::stoul( std::string( argv[6] ) );
+      generate_dag_db( allowed_num_fanins, max_gates_of_fanin, max_gates, max_num_in, max_levels, false );
+    }
   }
   else if ( cmd == "cd" )
   {

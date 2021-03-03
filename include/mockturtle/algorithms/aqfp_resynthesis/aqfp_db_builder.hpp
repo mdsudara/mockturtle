@@ -15,7 +15,7 @@
 namespace mockturtle
 {
 
-template<typename Ntk = aqfp_logical_network_t<int>, int N = 4>
+template<typename Ntk = aqfp_logical_network_t<>, int N = 4>
 class aqfp_db_builder
 {
   using db_type = aqfp_db<Ntk, N>;

@@ -12,20 +12,18 @@ struct aqfp_fanout_resyn
 {
   aqfp_fanout_resyn( uint32_t branching_factor ) : branching_factor( branching_factor ) {}
 
-  /*! \brief Determines the relative levels of fanouts of a node assuming a nearly balanced splitter tree. */
+  /*! \brief Determines the relative levels of fanouts of a node assuming a nearly balanced 
+   *  splitter tree. */
   template<typename NtkSrc, typename NtkDest, typename FanoutNodeCallback, typename FanoutPoCallback>
-  void operator()(
-      const NtkSrc& ntk_src,
-      node<NtkSrc> n,
-      const NtkDest& ntk_dest,
-      signal<NtkDest> f,
-      uint32_t level_f,
-      FanoutNodeCallback&& fanout_node_fn,
-      FanoutPoCallback&& fanout_co_fn )
+  void operator()( const NtkSrc& ntk_src, node<NtkSrc> n, const NtkDest& ntk_dest, signal<NtkDest> f,
+                   uint32_t level_f, FanoutNodeCallback&& fanout_node_fn, FanoutPoCallback&& fanout_co_fn )
   {
-    static_assert( has_foreach_fanout_v<NtkSrc>, "NtkSource does not implement the foreach_fanout method" );
-    static_assert( std::is_invocable_v<FanoutNodeCallback, node<NtkSrc>, uint32_t>, "FanoutNodeCallback is not callable with arguments (node, level)");
-    static_assert( std::is_invocable_v<FanoutPoCallback, uint32_t, uint32_t>, "FanoutNodeCallback is not callable with arguments (index, level)");
+    static_assert( has_foreach_fanout_v<NtkSrc>,
+                   "NtkSource does not implement the foreach_fanout method" );
+    static_assert( std::is_invocable_v<FanoutNodeCallback, node<NtkSrc>, uint32_t>,
+                   "FanoutNodeCallback is not callable with arguments (node, level)" );
+    static_assert( std::is_invocable_v<FanoutPoCallback, uint32_t, uint32_t>,
+                   "FanoutNodeCallback is not callable with arguments (index, level)" );
 
     auto offsets = balanced_splitter_tree_offsets( ntk_src.fanout_size( n ) );
 
@@ -35,8 +33,8 @@ struct aqfp_fanout_resyn
       return ( ntk_src.depth() - ntk_src.level( f1 ) ) > ( ntk_src.depth() - ntk_src.level( f2 ) );
     } );
 
-    auto n_dest = ntk_dest.get_node(f);
-    auto no_splitters = ntk_dest.is_constant(n_dest) || ntk_dest.is_ci(n_dest);
+    auto n_dest = ntk_dest.get_node( f );
+    auto no_splitters = ntk_dest.is_constant( n_dest ) || ntk_dest.is_ci( n_dest );
 
     uint32_t foind = 0u;
     for ( auto fo : fanouts )
@@ -55,7 +53,8 @@ struct aqfp_fanout_resyn
 private:
   uint32_t branching_factor;
 
-  /*! \brief Determines the relative levels of the fanouts of a balanced splitter tree with `num_fanouts` many fanouts. */
+  /*! \brief Determines the relative levels of the fanouts of a balanced splitter tree with 
+   *  `num_fanouts` many fanouts. */
   std::vector<uint32_t> balanced_splitter_tree_offsets( uint32_t num_fanouts )
   {
     if ( num_fanouts == 1u )

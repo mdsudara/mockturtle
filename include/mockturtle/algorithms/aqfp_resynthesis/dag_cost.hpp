@@ -7,93 +7,11 @@
 #include <fmt/format.h>
 
 #include "./dag.hpp"
-#include "./utils.hpp"
+
+#include "../../properties/aqfpcost.hpp"
 
 namespace mockturtle
 {
-
-class fanout_cost_computer
-{
-public:
-  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
-
-  fanout_cost_computer( const std::unordered_map<uint32_t, double>& splitters ) : buffer_cost( splitters.at( 1u ) ), splitters( remove_buffer( splitters ) )
-  {
-  }
-
-  double operator()( const std::vector<uint32_t>& config )
-  {
-    return cost_for_config( config );
-  }
-
-private:
-  double buffer_cost;
-  std::unordered_map<uint32_t, double> splitters;
-  std::unordered_map<std::vector<uint32_t>, double> cache;
-
-  static std::unordered_map<uint32_t, double> remove_buffer( std::unordered_map<uint32_t, double> splitters )
-  {
-    splitters.erase( 1u );
-    return splitters;
-  }
-
-  /**
-   * \brief Compute the best splitter and buffer cost for a given relative level configuration of the fanouts.
-   */
-  double cost_for_config( const std::vector<uint32_t> config )
-  {
-    if ( config.size() == 1 )
-    {
-      if ( config[0] >= 1 )
-      {
-        return ( config[0] - 1 ) * buffer_cost;
-      }
-      else
-      {
-        return IMPOSSIBLE;
-      }
-    }
-
-    if ( cache.count( config ) )
-    {
-      return cache[config];
-    }
-
-    auto result = IMPOSSIBLE;
-
-    for ( const auto& s : splitters )
-    {
-      for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
-      {
-        auto sp_lev = config[config.size() - size] - 1;
-        if ( sp_lev == 0 )
-        {
-          continue;
-        }
-
-        auto temp = s.second;
-
-        for ( auto i = config.size() - size; i < config.size(); i++ )
-        {
-          temp += ( config[i] - config[config.size() - size] ) * buffer_cost;
-        }
-
-        std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
-        new_config.push_back( sp_lev );
-        std::sort( new_config.begin(), new_config.end() );
-
-        temp += cost_for_config( new_config );
-
-        if ( temp < result )
-        {
-          result = temp;
-        }
-      }
-    }
-
-    return ( cache[config] = result );
-  }
-};
 
 template<typename Ntk>
 class simple_cost_computer
@@ -141,7 +59,7 @@ public:
   static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
 
   aqfp_cost_computer( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters, uint32_t max_num_pis )
-      : simp_cc( gate_costs ), fanout_cc(splitters), splitters( splitters ), buffer_cost( splitters.at( 1u ) ), max_num_pis( max_num_pis ) {}
+      : simp_cc( gate_costs ), fanout_cc( splitters ), splitters( splitters ), buffer_cost( splitters.at( 1u ) ), max_num_pis( max_num_pis ) {}
 
   double operator()( Ntk& net )
   {
@@ -289,14 +207,14 @@ private:
     std::vector<uint32_t> curlev;
     std::vector<uint32_t> minlev;
     std::vector<uint32_t> maxlev;
-    std::vector<std::vector<typename Ntk::NodeT>> fanout;
+    std::vector<std::vector<typename Ntk::node_type>> fanout;
     std::unordered_map<std::vector<uint32_t>, double> rellev_cache;
 
     cost_context( const Ntk& net ) : net( net ), curlev( net.nodes.size() ), minlev( net.nodes.size() ), maxlev( net.nodes.size() ), fanout( net.nodes.size() ) {}
   };
 
   simple_cost_computer<Ntk> simp_cc;
-  fanout_cost_computer fanout_cc;
+  balanced_fanout_net_cost fanout_cc;
   std::unordered_map<uint32_t, double> splitters;
   double buffer_cost;
   uint32_t max_num_pis;
@@ -314,7 +232,7 @@ private:
 
     auto mef = net.max_equal_fanins();
 
-    std::multiset<typename Ntk::NodeT> zero = {};
+    std::multiset<typename Ntk::node_type> zero = {};
     for ( auto&& t : net.last_layer_leaves )
     {
       if ( mef[t] > 0 )
@@ -523,7 +441,7 @@ private:
    * \brief Find the locally optimal fanout-net for a node if it in level 'lev', if its fanouts are
    * 'fanouts', and if fanouts are placed at fixed level given by 'level'.
    */
-  double cost_for_node_if_in_level( cost_context& ctx, uint32_t lev, std::vector<typename Ntk::NodeT> fanouts )
+  double cost_for_node_if_in_level( cost_context& ctx, uint32_t lev, std::vector<typename Ntk::node_type> fanouts )
   {
     std::vector<uint32_t> rellev;
     for ( auto fo : fanouts )
@@ -533,7 +451,7 @@ private:
     std::sort( rellev.begin(), rellev.end() );
 
     //return cost_for_config( ctx, rellev );
-    return fanout_cc(rellev);
+    return fanout_cc( rellev );
   }
 
   /**
@@ -677,7 +595,7 @@ private:
       return;
     }
 
-    if ( ctx.net.zero_input == (typename Ntk::NodeT)current_gid )
+    if ( ctx.net.zero_input == (typename Ntk::node_type)current_gid )
     {
       compute_best_costs_for_all_configs( ctx, current_gid + 1, cost_so_far, config_cost );
       return;

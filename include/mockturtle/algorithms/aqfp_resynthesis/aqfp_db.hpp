@@ -23,7 +23,8 @@ T bitwise_majority( const T& a, const T& b, const T& c )
 template<typename T>
 T bitwise_majority( const T& a, const T& b, const T& c, const T& d, const T& e )
 {
-  return ( a & b & c ) | ( a & b & d ) | ( a & b & e ) | ( a & c & d ) | ( a & c & e ) | ( a & d & e ) | ( b & c & d ) | ( b & c & e ) | ( b & d & e ) | ( c & d & e );
+  return ( a & b & c ) | ( a & b & d ) | ( a & b & e ) | ( a & c & d ) | ( a & c & e ) |
+         ( a & d & e ) | ( b & c & d ) | ( b & c & e ) | ( b & d & e ) | ( c & d & e );
 }
 
 /**
@@ -84,7 +85,8 @@ public:
     static_assert( N == 4u, "Template parameter N must be 4 in the current implementation." );
   }
 
-  aqfp_db( const std::unordered_map<uint64_t, std::map<uint64_t, replacement>>& db, const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
+  aqfp_db( const std::unordered_map<uint64_t, std::map<uint64_t, replacement>>& db,
+           const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
            const std::unordered_map<uint32_t, double>& splitters = { { 1u, 2.0 }, { 4u, 2.0 } } )
       : gate_costs( gate_costs ), splitters( splitters ), db( db ), cc( gate_costs, splitters, 4u )
   {
@@ -98,7 +100,8 @@ public:
    * returns (success, replacement, best cost, best_lev).
    */
   template<typename ComparisonFn>
-  mig_structure get_best_replacement( uint64_t f, std::vector<uint32_t> _levels, std::vector<bool> _is_const, ComparisonFn&& comparison_fn )
+  mig_structure get_best_replacement( uint64_t f, std::vector<uint32_t> _levels,
+                                      std::vector<bool> _is_const, ComparisonFn&& comparison_fn )
   {
     // find the npn class for the function
     auto tmp = npndb( f );

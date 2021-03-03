@@ -29,19 +29,13 @@
 
   \author Heinz Riener
   \author Mathias Soeken
-  \author Dewmini Marakkalage 
 */
 
 #pragma once
 
 #include <cstdint>
-#include <limits>
 
-#include "../traits.hpp"
-
-#include "../views/fanout_view.hpp"
-
-#include "../algorithms/aqfp_resynthesis/dag_cost.hpp"
+#include "../traits.hpp" 
 
 namespace mockturtle
 {
@@ -128,67 +122,5 @@ uint32_t costs( Ntk const& ntk )
   } );
   return total;
 }
-
-struct aqfp_network_cost
-{
-  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
-
-  aqfp_network_cost( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
-      : gate_costs( gate_costs ), fanout_cc( splitters ) {}
-
-  template<typename Ntk, typename LevelMap>
-  double operator()( const Ntk& ntk, const LevelMap& level_of_node, uint32_t critical_po_level )
-  {
-    fanout_view dest_fv{ ntk };
-    auto gate_cost = 0.0;
-    auto fanout_net_cost = 0.0;
-
-    std::vector<node<Ntk>> internal_nodes;
-    dest_fv.foreach_node( [&]( auto n ) {
-      if ( dest_fv.is_constant( n ) || dest_fv.is_pi( n ) )
-      {
-        return;
-      }
-
-      if ( n > 0u && dest_fv.is_maj( n ) )
-      {
-        internal_nodes.push_back( n );
-      }
-    } );
-
-    for ( auto n : internal_nodes )
-    {
-      gate_cost += gate_costs.at( ntk.fanin_size( n ) );
-
-      std::vector<uint32_t> rellev;
-
-      dest_fv.foreach_fanout( n, [&]( auto fo ) {
-        assert( level_of_node.at( fo ) > level_of_node.at( n ) );
-        rellev.push_back( level_of_node.at( fo ) - level_of_node.at( n ) );
-      } );
-
-      uint32_t pos = 0u;
-      while ( rellev.size() < dest_fv.fanout_size( n ) )
-      {
-        pos++;
-        rellev.push_back( critical_po_level - level_of_node.at( n ) );
-      }
-
-      if ( rellev.size() > 1u || ( rellev.size() == 1u && rellev[0] > 0 ) )
-      {
-        std::sort( rellev.begin(), rellev.end() );
-        fanout_net_cost += fanout_cc( rellev );
-      }
-    }
-
-    return gate_cost + fanout_net_cost;
-
-    return 0.0;
-  }
-
-private:
-  std::unordered_map<uint32_t, double> gate_costs;
-  fanout_cost_computer fanout_cc;
-};
 
 } /* namespace mockturtle */

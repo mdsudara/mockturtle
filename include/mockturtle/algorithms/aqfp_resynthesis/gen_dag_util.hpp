@@ -12,7 +12,7 @@
 
 #include <fmt/format.h>
 
-#include "./utils.hpp"
+#include "../../utils/hash_functions.hpp"
 
 namespace mockturtle
 {
@@ -20,18 +20,12 @@ namespace mockturtle
 namespace detail
 {
 
-/*
- * Computes and returns the frequency map for a given collection of elements
- */
+/*! \brief Computes and returns the frequency map for a given collection of elements. */
 template<typename ElemT>
 inline auto get_frequencies( const std::vector<ElemT>& elems )
 {
   std::map<ElemT, uint32_t> elem_counts;
   std::for_each( elems.begin(), elems.end(), [&elem_counts]( auto e ) { elem_counts[e]++; } );
-  //for ( const auto& e : elems )
-  //{
-  //elem_counts[e]++;
-  //}
   return elem_counts;
 }
 
@@ -49,9 +43,8 @@ class partition_generator
   using outer_cache_t = std::unordered_map<outer_cache_key_t, inner_cache_t>;
 
 public:
-  /**
-   * \brief Computes and returns a set of partitions for a given list of elements
-   * such that no part contains any element 'e' more than 'max_counts[e]' times.
+  /*! \brief Computes and returns a set of partitions for a given list of elements
+   * such that no part contains any element `e` more than `max_counts[e]` times.
    */
   partition_set operator()(
       std::vector<int> elems,
@@ -152,10 +145,9 @@ class partition_extender
   using outer_cache_t = std::map<outer_cache_key_t, inner_cache_t>;
 
 public:
-  /**
-   * \brief Compute a list of different partitions that can be obtained by adding elements in
-   * 'elems' to the parts of 'base' such that no part contains any element 'e' more than
-   * 'max_counts[e]' times
+  /*! \brief Compute a list of different partitions that can be obtained by adding elements 
+   * in `elems` to the parts of `base` such that no part contains any element `e` more than
+   * `max_counts[e]` times
    */
   partition_set operator()( std::vector<ElemT> elems, partition base, const std::vector<uint32_t>& max_counts, uint32_t max_part_size = 0 )
   {
@@ -234,8 +226,8 @@ struct sublist_generator
 
 public:
   /**
-   * \brief Given a list of elements 'elems', generate all sub lists of those elements.
-   * Ex: if 'elems' = [1, 2, 2, 3], this will generate the following lists:
+   * \brief Given a list of elements `elems`, generate all sub lists of those elements.
+   * Ex: if `elems` = [1, 2, 2, 3], this will generate the following lists:
    * [0], [1], [1, 2], [1, 2, 2], [1, 2, 2, 3], [1, 2, 3], [1, 3], [2], [2, 2], [2, 2, 3], [2, 3], and [3].
    */
   std::set<std::vector<ElemT>> operator()( std::vector<ElemT> elems )

@@ -34,16 +34,18 @@ struct aqfp_node_resyn_param
 /*! \brief This datastructure can be passed to `aqfp_resynthesis` as the node resynthesis algorithm. */
 struct aqfp_node_resyn
 {
-  aqfp_node_resyn(aqfp_db<>& db, const aqfp_node_resyn_param& ps ) : params( ps ), db( db )
+  aqfp_node_resyn( aqfp_db<>& db, const aqfp_node_resyn_param& ps ) : params( ps ), db( db )
   {
-
   }
 
   template<typename NtkDest, typename TruthTable, typename LeavesIterator, typename LevelUpdateCallback, typename ResynPerformedCallback>
-  void operator()( NtkDest& ntk_dest, const TruthTable& f, LeavesIterator leaves_begin, LeavesIterator leaves_end, LevelUpdateCallback&& level_update_callback, ResynPerformedCallback&& resyn_performed_callback ) 
+  void operator()( NtkDest& ntk_dest, const TruthTable& f, LeavesIterator leaves_begin, LeavesIterator leaves_end,
+                   LevelUpdateCallback&& level_update_callback, ResynPerformedCallback&& resyn_performed_callback )
   {
-    static_assert( std::is_invocable_v<LevelUpdateCallback, node<NtkDest>, uint32_t>, "LevelUpdateCallback must be callable with arguments of types (node<NtkDest>, level)" );
-    static_assert( std::is_invocable_v<ResynPerformedCallback, signal<NtkDest>>, "ResynPerformedCallback must be callable with an argument of type signal<NtkDest>" );
+    static_assert( std::is_invocable_v<LevelUpdateCallback, node<NtkDest>, uint32_t>,
+                   "LevelUpdateCallback must be callable with arguments of types (node<NtkDest>, level)" );
+    static_assert( std::is_invocable_v<ResynPerformedCallback, signal<NtkDest>>,
+                   "ResynPerformedCallback must be callable with an argument of type signal<NtkDest>" );
 
     std::vector<signal<NtkDest>> leaves;
     std::vector<uint32_t> leaf_levels;

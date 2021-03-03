@@ -20,7 +20,7 @@ namespace mockturtle
  * Unlike logic networks elsewhere in mockturtle, gates are numbered from 0 starting from the top gate.
  */
 template<typename NodeT = int>
-struct aqfp_logical_network_t
+struct aqfp_logical_network_builder : public aqfp_logical_network<NodeT>
 {
   using node_type = NodeT;
 
