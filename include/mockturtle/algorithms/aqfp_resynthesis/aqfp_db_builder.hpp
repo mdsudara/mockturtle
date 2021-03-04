@@ -15,7 +15,7 @@
 namespace mockturtle
 {
 
-template<typename Ntk = aqfp_logical_network_t<>, int N = 4>
+template<typename Ntk = aqfp_dag<>, int N = 4>
 class aqfp_db_builder
 {
   using db_type = aqfp_db<Ntk, N>;
@@ -25,7 +25,7 @@ public:
   aqfp_db_builder( 
     const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
       const std::unordered_map<uint32_t, double>& splitters = { { 1u, 2.0 }, { 4u, 2.0 } } 
-   ) :  gate_costs(gate_costs), splitters(splitters), cc( gate_costs, splitters, 4u ) {}
+   ) :  gate_costs(gate_costs), splitters(splitters), cc( gate_costs, splitters) {}
 
   db_type build()
   {
@@ -192,8 +192,8 @@ public:
         double cost = std::stod( line );
 
         std::getline( is, line );
-        Ntk ntk;
-        ntk.decode_dag( line );
+        Ntk ntk(line);
+        // ntk.decode_dag( line );
 
         std::vector<uint8_t> perm( N );
         for ( int i = 0; i < N; i++ )
@@ -218,7 +218,7 @@ private:
   std::unordered_map<uint32_t, double> gate_costs;
   std::unordered_map<uint32_t, double> splitters;
   std::unordered_map<uint64_t, std::map<uint64_t, replacement>> db;
-  mockturtle::aqfp_cost_computer<Ntk> cc;
+  mockturtle::dag_aqfp_cost_and_depths<Ntk> cc;
   npn_cache<N> npndb;
 
   /** 

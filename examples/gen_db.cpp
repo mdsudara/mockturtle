@@ -13,13 +13,10 @@
 #include <mockturtle/algorithms/aqfp_resynthesis/dag_cost.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/gen_dag.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/generate_db.hpp>
-#include <mockturtle/algorithms/aqfp_resynthesis/sat.hpp>
+//#include <mockturtle/algorithms/aqfp_resynthesis/sat.hpp>
 
 void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, const std::map<uint32_t, uint32_t>& max_gates_of_fanin = { { 3u, 7u } }, uint32_t max_gates = 7u, uint32_t max_num_in = 5u, uint32_t max_levels = 7u, bool count_only = false )
 {
-  // std::vector<uint32_t> allowed_num_fanins = { 3u };                // will use only fanin 3 gates
-  // std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 7u } }; // allow at most 7 3-input gates and 0 5-input gates
-
   auto params = mockturtle::dag_generator_params();
 
   params.max_gates = max_gates;   // allow at most 7 gates in total
@@ -36,69 +33,69 @@ void generate_dag_db( const std::vector<uint32_t>& allowed_num_fanins = { 3u }, 
 
 void generate_cost_db()
 {
-  using Ntk = mockturtle::aqfp_logical_network_t<int>;
-  mockturtle::aqfp_cost_computer<Ntk> cc( { { 3u, 6.0 } }, { { 1u, 2.0 }, { 4u, 2.0 } }, 4u );
+  using Ntk = mockturtle::aqfp_dag<>;
+  mockturtle::dag_aqfp_cost_all_configs<Ntk> cc( { { 3u, 6.0 } }, { { 1u, 2.0 }, { 4u, 2.0 } } );
   mockturtle::cost_all_dags( std::cin, std::cout, cc, 1u );
 }
 
-void generate_dag_npn_db()
-{
-  mockturtle::simulate_all_dags( std::cin, std::cout, 1u );
-}
+// void generate_dag_npn_db()
+// {
+//   mockturtle::simulate_all_dags( std::cin, std::cout, 1u );
+// }
 
-void test_sat_based_exact_syn()
-{
-  using Ntk = mockturtle::aqfp_logical_network_t<int>;
+// void test_sat_based_exact_syn()
+// {
+//   using Ntk = mockturtle::aqfp_dag<int>;
 
-  uint64_t tt = 0x0001;
+//   uint64_t tt = 0x0001;
 
-  std::vector<uint32_t> allowed_num_fanins = { 3u, 5u };                        // will use only fanin 3 gates
-  std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 3u }, { 5u, 0u } }; // allow at most 3 3-input gates and 3 5-input gates
+//   std::vector<uint32_t> allowed_num_fanins = { 3u, 5u };                        // will use only fanin 3 gates
+//   std::map<uint32_t, uint32_t> max_gates_of_fanin = { { 3u, 3u }, { 5u, 0u } }; // allow at most 3 3-input gates and 3 5-input gates
 
-  auto params = mockturtle::dag_generator_params();
+//   auto params = mockturtle::dag_generator_params();
 
-  params.max_gates = 3u;         // allow at most 4 gates in total
-  params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
-  params.max_width = 1000u;      // maximum number of gates at any level
-  params.max_num_in = 5u;        // maximum number of inputs slots (need extra one for the constant)
-  params.max_levels = 3u;        // maximum number of gate levels in a DAG
+//   params.max_gates = 3u;         // allow at most 4 gates in total
+//   params.max_num_fanout = 1000u; // limit the maximum fanout of a gate
+//   params.max_width = 1000u;      // maximum number of gates at any level
+//   params.max_num_in = 5u;        // maximum number of inputs slots (need extra one for the constant)
+//   params.max_levels = 3u;        // maximum number of gate levels in a DAG
 
-  params.allowed_num_fanins = allowed_num_fanins;
-  params.max_gates_of_fanin = max_gates_of_fanin;
+//   params.allowed_num_fanins = allowed_num_fanins;
+//   params.max_gates_of_fanin = max_gates_of_fanin;
 
-  mockturtle::dag_generator<int, mockturtle::simple_cost_computer<Ntk>> gen( params, mockturtle::simple_cost_computer<Ntk>( { { 3u, 3.0 }, { 5u, 5.0 } } ) );
-  while ( true )
-  {
-    auto should_expand_pdag = [&]( Ntk net ) {
-      for ( auto&& t : net.last_layer_leaves )
-      {
-        net.add_leaf_node( { t } );
-      }
+//   mockturtle::dag_generator<int, mockturtle::simple_cost_computer<Ntk>> gen( params, mockturtle::simple_cost_computer<Ntk>( { { 3u, 3.0 }, { 5u, 5.0 } } ) );
+//   while ( true )
+//   {
+//     auto should_expand_pdag = [&]( Ntk net ) {
+//       for ( auto&& t : net.last_layer_leaves )
+//       {
+//         net.add_leaf_node( { t } );
+//       }
 
-      for ( auto&& t : net.other_leaves )
-      {
-        net.add_leaf_node( { t } );
-      }
+//       for ( auto&& t : net.other_leaves )
+//       {
+//         net.add_leaf_node( { t } );
+//       }
 
-      net.last_layer_leaves.clear();
-      net.other_leaves.clear();
+//       net.last_layer_leaves.clear();
+//       net.other_leaves.clear();
 
-      return mockturtle::is_synthesizable( net, 4u, tt, 10u );
-    };
+//       return mockturtle::is_synthesizable( net, 4u, tt, 10u );
+//     };
 
-    auto netopt = gen.next_dag( should_expand_pdag );
+//     auto netopt = gen.next_dag( should_expand_pdag );
 
-    if ( netopt == std::nullopt )
-    {
-      break;
-    }
+//     if ( netopt == std::nullopt )
+//     {
+//       break;
+//     }
 
-    auto net = netopt.value();
-    auto res = mockturtle::is_synthesizable( net, 4u, tt, 1u );
+//     auto net = netopt.value();
+//     auto res = mockturtle::is_synthesizable( net, 4u, tt, 1u );
 
-    fmt::print( "dag {} {} synthesize 0x{:04x}\n", net.encode_as_string(), res ? "can" : "cannot", tt );
-  }
-}
+//     fmt::print( "dag {} {} synthesize 0x{:04x}\n", net.encode_as_string(), res ? "can" : "cannot", tt );
+//   }
+// }
 
 void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
 {
@@ -136,8 +133,7 @@ void generate_aqfp_db( std::string dpath, std::string cpath, std::string opath )
         configs[std::stoul( token, 0, 16 )] = cst;
       }
 
-      mockturtle::aqfp_logical_network_t<int> ntk;
-      ntk.decode_dag( dag );
+      mockturtle::aqfp_dag<> ntk(dag);
       if ( ntk.input_slots.size() < 5u || ( ntk.input_slots.size() == 5u && ntk.zero_input != 0 ) )
       {
         db.update( ntk, configs );
@@ -242,7 +238,7 @@ int main( int argc, char** argv )
   }
   else if ( cmd == "sd" )
   {
-    generate_dag_npn_db();
+   // generate_dag_npn_db();
   }
   else if ( cmd == "ad" )
   {
@@ -256,7 +252,7 @@ int main( int argc, char** argv )
   }
   else if ( cmd == "ts" )
   {
-    test_sat_based_exact_syn();
+  //  test_sat_based_exact_syn();
   }
   else
   {

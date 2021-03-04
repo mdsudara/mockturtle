@@ -13,8 +13,7 @@
 namespace mockturtle
 {
 
-using mig_node2 = std::pair<uint64_t, std::vector<uint32_t>>;
-using mig_chain = std::vector<mig_node2>;
+using mig_chain = std::vector<std::pair<uint64_t, std::vector<uint32_t>>>;
 
 uint64_t input_tt[] = {
     0x0000000000000000L,
@@ -377,7 +376,7 @@ class sat_encoder
   }
 
 public:
-  sat_encoder( const aqfp_logical_network_t<int>& _net, uint32_t _num_in, uint64_t _tt, uint32_t _verbose = 0 )
+  sat_encoder( const aqfp_dag<>& _net, uint32_t _num_in, uint64_t _tt, uint32_t _verbose = 0 )
   {
     net = _net;
     num_in = _num_in;
@@ -563,7 +562,7 @@ public:
   }
 
 private:
-  aqfp_logical_network_t<int> net;
+  aqfp_dag<> net;
 
   bool output_inv;
   uint64_t tt;

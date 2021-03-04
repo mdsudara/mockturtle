@@ -61,7 +61,7 @@ inline uint64_t lvl_cfg_from_vec( std::vector<uint8_t> levels )
   return res;
 }
 
-template<typename Ntk = aqfp_logical_network_t<int>, int N = 4>
+template<typename Ntk = aqfp_dag<>, int N = 4>
 class aqfp_db
 {
 
@@ -88,7 +88,7 @@ public:
   aqfp_db( const std::unordered_map<uint64_t, std::map<uint64_t, replacement>>& db,
            const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
            const std::unordered_map<uint32_t, double>& splitters = { { 1u, 2.0 }, { 4u, 2.0 } } )
-      : gate_costs( gate_costs ), splitters( splitters ), db( db ), cc( gate_costs, splitters, 4u )
+      : gate_costs( gate_costs ), splitters( splitters ), db( db ), cc( gate_costs, splitters )
   {
     static_assert( N == 4u, "Template parameter N must be 4 in the current implementation." );
   }
@@ -166,7 +166,7 @@ public:
       levs[i] = best.input_levels[best.input_perm[i]];
     }
 
-    auto [new_cost, new_levels] = cc.aqfp_cost_with_fixed_input_levels( best.ntk, levs, is_const );
+    auto [new_cost, new_levels] = cc( best.ntk, levs  );
 
     best.gate_levels = new_levels;
     best_cost += new_cost;
@@ -178,7 +178,7 @@ private:
   std::unordered_map<uint32_t, double> gate_costs;
   std::unordered_map<uint32_t, double> splitters;
   std::unordered_map<uint64_t, std::map<uint64_t, replacement>> db;
-  mockturtle::aqfp_cost_computer<Ntk> cc;
+  mockturtle::dag_aqfp_cost_and_depths<Ntk> cc;
   npn_cache<N> npndb;
 
   std::vector<uint8_t> inverter_config_for_func( const std::vector<uint64_t>& input_tt, const Ntk& net, uint64_t func )

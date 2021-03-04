@@ -6,102 +6,80 @@
 
 #include <fmt/format.h>
 
-#include "./dag.hpp"
-
 #include "../../properties/aqfpcost.hpp"
+#include "./dag.hpp"
 
 namespace mockturtle
 {
 
+/*! \brief Cost function for dag structures that compute the gate cost. */
 template<typename Ntk>
-class simple_cost_computer
+class dag_gate_cost
 {
 public:
-  simple_cost_computer( const std::unordered_map<uint32_t, double>& gate_costs ) : gate_costs( gate_costs )
-  {
-  }
+  dag_gate_cost( const std::unordered_map<uint32_t, double>& gate_costs ) : gate_costs( gate_costs ) {}
 
-  /**
-   * \brief Computes and updates the simple cost of a network.
-   */
-  double operator()( mockturtle::aqfp_logical_network_t<int>& net )
-  {
-    if ( net.computed_cost < 0.0 )
-    {
-      net.computed_cost = compute_simple_cost( net );
-    }
-    return net.computed_cost;
-  }
-
-private:
-  std::unordered_map<uint32_t, double> gate_costs;
-
-  double compute_simple_cost( const Ntk& net )
+  double operator()( Ntk& net )
   {
     double res = 0.0;
 
-    for ( auto it = net.num_gates_of_fanin.begin(); it != net.num_gates_of_fanin.end(); it++ )
+    for ( const auto& node : net.nodes )
     {
-      assert( gate_costs.count( it->first ) > 0 );
-      res += gate_costs.at( it->first ) * it->second;
+      if ( !node.empty() )
+        res += gate_costs.at( node.size() );
     }
 
     return res;
   }
+
+private:
+  std::unordered_map<uint32_t, double> gate_costs;
 };
 
+/*! \brief Cost function for dag structures that compute the gate and path balancing cost. */
 template<typename Ntk>
-class aqfp_cost_computer
+class dag_aqfp_cost
 {
 public:
-  using level_config_t = uint64_t;
-
   static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
 
-  aqfp_cost_computer( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters, uint32_t max_num_pis )
-      : simp_cc( gate_costs ), fanout_cc( splitters ), splitters( splitters ), buffer_cost( splitters.at( 1u ) ), max_num_pis( max_num_pis ) {}
+  using depth_config_t = uint64_t;
 
-  double operator()( Ntk& net )
+  dag_aqfp_cost( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
+      : simp_cc( gate_costs ), fanout_cc( splitters ) {}
+
+  /*! \brief Compute cost assuming all primary inputs are at the same depth. */
+  double operator()( Ntk& orig_net )
   {
-    return aqfp_cost( net );
-  }
+    net = orig_net;
+    fanout = std::vector<std::vector<typename Ntk::node_type>>( net.nodes.size() );
+    minlev = std::vector<uint32_t>( net.nodes.size() );
+    maxlev = std::vector<uint32_t>( net.nodes.size() );
+    curlev = std::vector<uint32_t>( net.nodes.size() );
 
-  /**
-   * Computes the AQFP cost for a network and save it if it is not computed before. Then returns
-   * the computed cost. Cost is computed by considering different ways of fixing levels of the gates
-   * and then computing locally optimum fanout-nets.
-   */
-  double aqfp_cost( Ntk& orig_net )
-  {
-    if ( orig_net.computed_cost >= 0.0 )
-    {
-      return orig_net.computed_cost;
-    }
+    compute_fanouts( net, fanout );
+    compute_min_levels( net, fanout, minlev );
 
-    cost_context ctx( orig_net.is_partial_dag ? convert_to_min_cost_dag( orig_net ) : orig_net );
-
-    compute_fanouts( ctx.net, ctx.fanout );
-    compute_min_levels( ctx.net, ctx.fanout, ctx.minlev );
-
-    auto lastlev = *( std::max_element( ctx.minlev.begin(), ctx.minlev.end() ) );
-
+    // perform depth bounded search
     double cost = IMPOSSIBLE;
+
+    auto lastlev = *( std::max_element( minlev.begin(), minlev.end() ) );
     while ( true )
     {
-      compute_max_levels( ctx.net, ctx.fanout, ctx.maxlev, lastlev );
+      compute_max_levels( net, fanout, maxlev, lastlev );
 
       // fix levels for the root and the inputs
-      ctx.maxlev[0] = 0;
-      for ( auto f : ctx.net.input_slots )
+      maxlev[0] = 0;
+      for ( auto f : net.input_slots )
       {
-        if ( f != ctx.net.zero_input )
+        if ( f != net.zero_input )
         {
-          ctx.minlev[f] = lastlev;
+          minlev[f] = lastlev;
         }
       }
 
       // check different level configurations for the other gates and compute the cost for buffers and splitters
-      cost = compute_best_cost( ctx, 1u, 0.0 );
+      cost = compute_best_cost( 1u, 0.0 );
 
       if ( cost < IMPOSSIBLE )
       {
@@ -112,164 +90,21 @@ public:
     }
 
     // add the gate costs
-    cost += simp_cc( ctx.net );
+    cost += simp_cc( net );
 
-    return ( orig_net.computed_cost = cost );
+    return cost;
   }
 
-  std::tuple<double, std::vector<uint32_t>> aqfp_cost_with_fixed_input_levels( Ntk& orig_net, const std::vector<uint32_t>& input_levels, const std::vector<bool>& const_or_pi )
-  {
-    (void)const_or_pi;
-    cost_context ctx( orig_net );
-
-    compute_fanouts( ctx.net, ctx.fanout );
-    compute_min_levels( ctx.net, ctx.fanout, ctx.minlev );
-    compute_max_levels( ctx.net, ctx.fanout, ctx.maxlev, input_levels );
-
-    uint32_t ind = 0u;
-    // for (auto x : ctx.net.input_slots) {
-    //   if (x == ctx.net.zero_input) continue;
-    //   if (const_or_pi[ind++]) {
-    //     ctx.fanout[x].clear();
-    //   }
-    // }
-
-    // fix levels for the root and the inputs
-    ctx.maxlev[0] = 0;
-    ind = 0u;
-    for ( auto f : ctx.net.input_slots )
-    {
-      if ( f != ctx.net.zero_input )
-      {
-        ctx.minlev[f] = input_levels[ind++];
-      }
-    }
-
-    // check different level configurations for the other gates and compute the cost for buffers and splitters
-    auto [cost, levels] = compute_best_cost_and_levels( ctx, 1u, 0.0 );
-
-    // add the gate costs
-    cost += simp_cc( ctx.net );
-
-    return { cost, levels };
-  }
-
-  /**
-   * Computes the AQFP cost for a network and save it if it is not computed before. Then returns
-   * the computed cost. Cost is computed by considering different ways of fixing levels of the gates
-   * and then computing locally optimum fanout-nets.
-   */
-  std::unordered_map<level_config_t, double>
-  cost_all_level_configurations( const Ntk& orig_net )
-  {
-    assert( !orig_net.is_partial_dag );
-
-    std::unordered_map<level_config_t, double> config_cost;
-
-    cost_context ctx( orig_net );
-
-    compute_fanouts( ctx.net, ctx.fanout );
-    compute_min_levels( ctx.net, ctx.fanout, ctx.minlev );
-
-    auto lastlev = *( std::max_element( ctx.minlev.begin(), ctx.minlev.end() ) );
-    while ( true )
-    {
-      compute_max_levels( ctx.net, ctx.fanout, ctx.maxlev, lastlev );
-
-      // fix levels for the root and the inputs
-      ctx.maxlev[0] = 0;
-
-      // check different level configurations for the other gates and compute the cost for buffers and splitters
-      compute_best_costs_for_all_configs( ctx, 1u, 0.0, config_cost );
-
-      if ( config_cost.size() > 0 )
-      {
-        break;
-      }
-
-      lastlev++;
-    }
-
-    double cost_for_gates = simp_cc( ctx.net );
-
-    for ( auto it = config_cost.begin(); it != config_cost.end(); it++ )
-    {
-      it->second += cost_for_gates;
-    }
-
-    return config_cost;
-  }
-
-private:
-  struct cost_context
-  {
-    Ntk net;
-    std::vector<uint32_t> curlev;
-    std::vector<uint32_t> minlev;
-    std::vector<uint32_t> maxlev;
-    std::vector<std::vector<typename Ntk::node_type>> fanout;
-    std::unordered_map<std::vector<uint32_t>, double> rellev_cache;
-
-    cost_context( const Ntk& net ) : net( net ), curlev( net.nodes.size() ), minlev( net.nodes.size() ), maxlev( net.nodes.size() ), fanout( net.nodes.size() ) {}
-  };
-
-  simple_cost_computer<Ntk> simp_cc;
+protected:
+  dag_gate_cost<Ntk> simp_cc;
   balanced_fanout_net_cost fanout_cc;
-  std::unordered_map<uint32_t, double> splitters;
-  double buffer_cost;
-  uint32_t max_num_pis;
 
-  /**
-   * \brief Computes the min-cost dag that can be obtained from the given partial dag.
-   */
-  Ntk convert_to_min_cost_dag( Ntk net )
-  {
-    assert( net.is_partial_dag );
+  Ntk net;
+  std::vector<std::vector<typename Ntk::node_type>> fanout;
+  std::vector<uint32_t> minlev;
+  std::vector<uint32_t> maxlev;
+  std::vector<uint32_t> curlev;
 
-    // we need to compute the cost of a min cost dag that can be obtained from this partial dag
-    // for this, we ignore up to max number of fanins that could be connected to constants, and
-    // connect remaining slots to distinct inputs
-
-    auto mef = net.max_equal_fanins();
-
-    std::multiset<typename Ntk::node_type> zero = {};
-    for ( auto&& t : net.last_layer_leaves )
-    {
-      if ( mef[t] > 0 )
-      {
-        mef[t]--;
-        zero.insert( t );
-      }
-      else
-      {
-        net.add_leaf_node( { t } );
-      }
-    }
-
-    for ( auto&& t : net.other_leaves )
-    {
-      if ( mef[t] > 0 )
-      {
-        mef[t]--;
-        zero.insert( t );
-      }
-      else
-      {
-        net.add_leaf_node( { t } );
-      }
-    }
-
-    net.zero_input = net.add_leaf_node( zero );
-
-    net.last_layer_leaves.clear();
-    net.other_leaves.clear();
-
-    return net;
-  }
-
-  /**
-   * \brief Computes the fanouts of nodes.
-   */
   template<typename FanOutT>
   void compute_fanouts( const Ntk& net, FanOutT& fanout )
   {
@@ -285,9 +120,6 @@ private:
     }
   }
 
-  /**
-   * \brief Computes the min levels of nodes.
-   */
   template<typename FanOutT, typename MinLevT>
   void compute_min_levels( const Ntk& net, const FanOutT& fanout, MinLevT& minlev )
   {
@@ -300,7 +132,7 @@ private:
       else
       {
         auto critical_fo = *( std::max_element( fanout[i].begin(), fanout[i].end(),
-                                                [&minlev]( auto x, auto y ) { return ( minlev[x] < minlev[y] ); } ) );
+                                                [&]( auto x, auto y ) { return ( minlev[x] < minlev[y] ); } ) );
         minlev[i] = 1 + minlev[critical_fo];
         if ( fanout[i].size() > 1 )
         {
@@ -310,9 +142,6 @@ private:
     }
   }
 
-  /**
-   * \brief Computes the max levels from bottom assuming the input slots are at 'lastlev'.
-   */
   template<typename FanOutT, typename MaxLevT>
   void compute_max_levels( const Ntk& net, const FanOutT& fanout, MaxLevT& maxlev, uint32_t lastlev )
   {
@@ -346,15 +175,126 @@ private:
     }
   }
 
+  double cost_for_node_if_in_level( uint32_t lev, std::vector<typename Ntk::node_type> fanouts )
+  {
+    std::vector<uint32_t> rellev;
+    for ( auto fo : fanouts )
+    {
+      rellev.push_back( lev - curlev[fo] );
+    }
+    std::sort( rellev.begin(), rellev.end() );
+
+    return fanout_cc( rellev );
+  }
+
+  double compute_best_cost( uint32_t current_gid, double cost_so_far )
+  {
+    if ( net.num_gates() == current_gid )
+    {
+      for ( auto f : net.input_slots )
+      {
+        if ( ( f == net.zero_input ) || fanout[f].empty() )
+        {
+          continue;
+        }
+
+        cost_so_far += cost_for_node_if_in_level( maxlev[f], fanout[f] );
+
+        if ( cost_so_far >= IMPOSSIBLE )
+        {
+          return IMPOSSIBLE;
+        }
+      }
+
+      return cost_so_far;
+    }
+
+    auto result = IMPOSSIBLE;
+    for ( auto lev = minlev[current_gid]; lev <= maxlev[current_gid]; lev++ )
+    {
+      auto cost = cost_for_node_if_in_level( lev, fanout[current_gid] );
+      if ( cost >= IMPOSSIBLE )
+      {
+        continue;
+      }
+      curlev[current_gid] = lev;
+      auto temp = compute_best_cost( current_gid + 1, cost_so_far + cost );
+      if ( temp < result )
+      {
+        result = temp;
+      }
+    }
+
+    return result;
+  }
+};
+
+/*! \brief Compute cost together with the depth assignment to nodes for a given input depth configuration. */
+template<typename Ntk>
+class dag_aqfp_cost_and_depths : public dag_aqfp_cost<Ntk>
+{
+public:
+  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
+
+  using dag_aqfp_cost<Ntk>::simp_cc;
+  using dag_aqfp_cost<Ntk>::fanout_cc;
+  using dag_aqfp_cost<Ntk>::net;
+  using dag_aqfp_cost<Ntk>::fanout;
+  using dag_aqfp_cost<Ntk>::minlev;
+  using dag_aqfp_cost<Ntk>::maxlev;
+  using dag_aqfp_cost<Ntk>::curlev;
+  using dag_aqfp_cost<Ntk>::compute_fanouts;
+  using dag_aqfp_cost<Ntk>::compute_min_levels;
+  using dag_aqfp_cost<Ntk>::compute_max_levels;
+  using dag_aqfp_cost<Ntk>::cost_for_node_if_in_level;
+
+  dag_aqfp_cost_and_depths( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
+      : dag_aqfp_cost<Ntk>( gate_costs, splitters ) {}
+
+  std::pair<double, std::vector<uint32_t>> operator()( Ntk& orig_net, const std::vector<uint32_t>& input_depths )
+  {
+    net = orig_net;
+    fanout = std::vector<std::vector<typename Ntk::node_type>>( net.nodes.size() );
+    minlev = std::vector<uint32_t>( net.nodes.size() );
+    maxlev = std::vector<uint32_t>( net.nodes.size() );
+    curlev = std::vector<uint32_t>( net.nodes.size() );
+
+    compute_fanouts( net, fanout );
+    compute_min_levels( net, fanout, minlev );
+    compute_max_levels( net, fanout, maxlev, input_depths );
+
+    uint32_t ind = 0u;
+
+    // fix levels for the root and the inputs
+    maxlev[0] = 0;
+    ind = 0u;
+    for ( auto f : net.input_slots )
+    {
+      if ( f != net.zero_input )
+      {
+        minlev[f] = input_depths[ind++];
+      }
+    }
+
+    // check different level configurations for the other gates and compute the cost for buffers and splitters
+    auto [cost, levels] = compute_best_cost_and_levels( 1u, 0.0 );
+
+    // add the gate costs
+    cost += simp_cc( net );
+
+    return { cost, levels };
+  }
+
+private:
   template<typename FanOutT, typename MaxLevT>
-  void compute_max_levels( const Ntk& net, const FanOutT& fanout, MaxLevT& maxlev, std::vector<uint32_t> input_levels )
+  void compute_max_levels( const Ntk& net, const FanOutT& fanout, MaxLevT& maxlev, std::vector<uint32_t> input_depths )
   {
     uint32_t ind = 0u;
     for ( auto& f : net.input_slots )
     {
       if ( f != net.zero_input )
       {
-        maxlev[f] = input_levels[ind++];
+        maxlev[f] = input_depths[ind++];
       }
       else
       {
@@ -380,160 +320,19 @@ private:
     }
   }
 
-  // /**
-  //  * \brief Compute the best splitter and buffer cost for a given relative level configuration 'config'.
-  //  */
-  // double cost_for_config( cost_context& ctx, const std::vector<uint32_t> config )
-  // {
-  //   if ( config.size() == 1 )
-  //   {
-  //     if ( config[0] >= 1 )
-  //     {
-  //       return ( config[0] - 1 ) * buffer_cost;
-  //     }
-  //     else
-  //     {
-  //       return IMPOSSIBLE;
-  //     }
-  //   }
-
-  //   if ( ctx.rellev_cache.count( config ) )
-  //   {
-  //     return ctx.rellev_cache[config];
-  //   }
-
-  //   auto result = IMPOSSIBLE;
-
-  //   for ( const auto& s : splitters )
-  //   {
-  //     for ( auto size = 2u; size <= std::min( s.first, uint32_t( config.size() ) ); size++ )
-  //     {
-  //       auto sp_lev = config[config.size() - size] - 1;
-  //       if ( sp_lev == 0 )
-  //       {
-  //         continue;
-  //       }
-
-  //       auto temp = s.second;
-
-  //       for ( auto i = config.size() - size; i < config.size(); i++ )
-  //       {
-  //         temp += ( config[i] - config[config.size() - size] ) * buffer_cost;
-  //       }
-
-  //       std::vector<uint32_t> new_config( config.begin(), config.begin() + ( config.size() - size ) );
-  //       new_config.push_back( sp_lev );
-  //       std::sort( new_config.begin(), new_config.end() );
-
-  //       temp += cost_for_config( ctx, new_config );
-
-  //       if ( temp < result )
-  //       {
-  //         result = temp;
-  //       }
-  //     }
-  //   }
-
-  //   return ( ctx.rellev_cache[config] = result );
-  // }
-
-  /**
-   * \brief Find the locally optimal fanout-net for a node if it in level 'lev', if its fanouts are
-   * 'fanouts', and if fanouts are placed at fixed level given by 'level'.
-   */
-  double cost_for_node_if_in_level( cost_context& ctx, uint32_t lev, std::vector<typename Ntk::node_type> fanouts )
+  std::tuple<double, std::vector<uint32_t>> compute_best_cost_and_levels( uint32_t current_gid, double cost_so_far )
   {
-    std::vector<uint32_t> rellev;
-    for ( auto fo : fanouts )
+    if ( net.num_gates() == current_gid )
     {
-      rellev.push_back( lev - ctx.curlev[fo] );
-    }
-    std::sort( rellev.begin(), rellev.end() );
-
-    //return cost_for_config( ctx, rellev );
-    return fanout_cc( rellev );
-  }
-
-  /**
-   * \brief Compute the AQFP cost for a given network. This function fixes the level of gate with index 'current_gid',
-   * and calls it recursively for the next gate id. Levels are fixed starting from the root in the BFS order,
-   * so once we fix a level of a gate, we can compute the cost for its fanout-net. Once all gate levels are
-   * fixed, we can compute the costs of fanout-nets for the inputs (unless the network is partial DAG).
-   * For partial DAGs, we still add dummy-inputs to make them look like DAGs, but we ignore the costs of their
-   * fanout-nets.
-   */
-  double compute_best_cost( cost_context& ctx, uint32_t current_gid, double cost_so_far )
-  {
-    if ( ctx.net.num_gates() == current_gid )
-    {
-      if ( ctx.net.is_partial_dag )
+      for ( auto f : net.input_slots )
       {
-        auto t = ctx.net.input_slots.size() - max_num_pis + 1;
-
-        // let k be the least number of splitters we need
-        // k (sp.size() - 1) + 1 >= t ===> k >= (t - 1) / (sp.size() - 1)
-
-        // we cannot say anything about the buffer requirement not knowning the actual inputs
-        auto max_splitter = std::max_element( splitters.begin(), splitters.end(), []( auto f, auto s ) { return f.first < s.first; } );
-
-        return cost_so_far + ( ( t - 1 ) / ( max_splitter->first - 1 ) ) * max_splitter->second;
-      }
-
-      // net is a DAG, so compute fanout-net costs for primary inputs
-
-      for ( auto f : ctx.net.input_slots )
-      {
-        if ( ( f == ctx.net.zero_input ) || ctx.fanout[f].empty() )
+        if ( ( f == net.zero_input ) || fanout[f].empty() )
         {
           continue;
         }
 
-        cost_so_far += cost_for_node_if_in_level( ctx, ctx.maxlev[f], ctx.fanout[f] );
-
-        if ( cost_so_far >= IMPOSSIBLE )
-        {
-          return IMPOSSIBLE;
-        }
-      }
-
-      return cost_so_far;
-    }
-
-    auto result = IMPOSSIBLE;
-    for ( auto lev = ctx.minlev[current_gid]; lev <= ctx.maxlev[current_gid]; lev++ )
-    {
-      auto cost = cost_for_node_if_in_level( ctx, lev, ctx.fanout[current_gid] );
-      if ( cost >= IMPOSSIBLE )
-      {
-        continue;
-      }
-      ctx.curlev[current_gid] = lev;
-      auto temp = compute_best_cost( ctx, current_gid + 1, cost_so_far + cost );
-      if ( temp < result )
-      {
-        result = temp;
-      }
-    }
-
-    return result;
-  }
-
-  /**
-   * \brief Similar to compute_best_cost, but also return the corresponding levels that achieve the minimum cost.
-   */
-  std::tuple<double, std::vector<uint32_t>> compute_best_cost_and_levels( cost_context& ctx, uint32_t current_gid, double cost_so_far )
-  {
-    if ( ctx.net.num_gates() == current_gid )
-    {
-      for ( auto f : ctx.net.input_slots )
-      {
-        if ( ( f == ctx.net.zero_input ) || ctx.fanout[f].empty() )
-        {
-          continue;
-        }
-
-        ctx.curlev[f] = ctx.maxlev[f];
-        cost_so_far += cost_for_node_if_in_level( ctx, ctx.maxlev[f], ctx.fanout[f] );
+        curlev[f] = maxlev[f];
+        cost_so_far += cost_for_node_if_in_level( maxlev[f], fanout[f] );
 
         if ( cost_so_far >= IMPOSSIBLE )
         {
@@ -541,20 +340,20 @@ private:
         }
       }
 
-      return { cost_so_far, ctx.curlev };
+      return { cost_so_far, curlev };
     }
 
     double res_cost = IMPOSSIBLE;
     std::vector<uint32_t> res_lev = {};
-    for ( auto lev = ctx.minlev[current_gid]; lev <= ctx.maxlev[current_gid]; lev++ )
+    for ( auto lev = minlev[current_gid]; lev <= maxlev[current_gid]; lev++ )
     {
-      auto cost = cost_for_node_if_in_level( ctx, lev, ctx.fanout[current_gid] );
+      auto cost = cost_for_node_if_in_level( lev, fanout[current_gid] );
       if ( cost >= IMPOSSIBLE )
       {
         continue;
       }
-      ctx.curlev[current_gid] = lev;
-      auto [temp_cost, temp_lev] = compute_best_cost_and_levels( ctx, current_gid + 1, cost_so_far + cost );
+      curlev[current_gid] = lev;
+      auto [temp_cost, temp_lev] = compute_best_cost_and_levels( current_gid + 1, cost_so_far + cost );
       if ( temp_cost < res_cost )
       {
         res_cost = temp_cost;
@@ -564,52 +363,115 @@ private:
 
     return { res_cost, res_lev };
   }
+};
 
-  /**
-   * \brief Compute costs considering all input level configurations. Works for at most 8 inputs and at most 255 levels.
-   */
-  void compute_best_costs_for_all_configs( cost_context& ctx, uint32_t current_gid, double cost_so_far, std::unordered_map<level_config_t, double>& config_cost )
+/*! \brief Compute costs for different input depth configurations. */
+template<typename Ntk>
+class dag_aqfp_cost_all_configs : public dag_aqfp_cost<Ntk>
+{
+public:
+  static constexpr double IMPOSSIBLE = std::numeric_limits<double>::infinity();
+
+  using depth_config_t = uint64_t; // each byte encodes a depth of a primary input
+
+  using dag_aqfp_cost<Ntk>::simp_cc;
+  using dag_aqfp_cost<Ntk>::fanout_cc;
+  using dag_aqfp_cost<Ntk>::net;
+  using dag_aqfp_cost<Ntk>::fanout;
+  using dag_aqfp_cost<Ntk>::minlev;
+  using dag_aqfp_cost<Ntk>::maxlev;
+  using dag_aqfp_cost<Ntk>::curlev;
+  using dag_aqfp_cost<Ntk>::compute_fanouts;
+  using dag_aqfp_cost<Ntk>::compute_min_levels;
+  using dag_aqfp_cost<Ntk>::compute_max_levels;
+  using dag_aqfp_cost<Ntk>::cost_for_node_if_in_level;
+
+  dag_aqfp_cost_all_configs( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
+      : dag_aqfp_cost<Ntk>( gate_costs, splitters ) {}
+
+  std::unordered_map<depth_config_t, double> operator()( Ntk& orig_net )
   {
-    if ( ctx.net.nodes.size() == current_gid )
+    std::unordered_map<depth_config_t, double> config_cost;
+    net = orig_net;
+    fanout = std::vector<std::vector<typename Ntk::node_type>>( net.nodes.size() );
+    minlev = std::vector<uint32_t>( net.nodes.size() );
+    maxlev = std::vector<uint32_t>( net.nodes.size() );
+    curlev = std::vector<uint32_t>( net.nodes.size() );
+
+    compute_fanouts( net, fanout );
+    compute_min_levels( net, fanout, minlev );
+
+    auto lastlev = *( std::max_element( minlev.begin(), minlev.end() ) );
+    while ( true )
     {
-      level_config_t lconfig = 0u;
-      uint32_t ind = 0;
-      for ( auto f : ctx.net.input_slots )
+      compute_max_levels( net, fanout, maxlev, lastlev );
+
+      // fix levels for the root and the inputs
+      maxlev[0] = 0;
+
+      // check different level configurations for the other gates and compute the cost for buffers and splitters
+      compute_best_costs_for_all_configs( 1u, 0.0, config_cost );
+
+      if ( config_cost.size() > 0 )
       {
-        if ( f == ctx.net.zero_input )
+        break;
+      }
+
+      lastlev++;
+    }
+
+    double cost_for_gates = simp_cc( net );
+
+    for ( auto it = config_cost.begin(); it != config_cost.end(); it++ )
+    {
+      it->second += cost_for_gates;
+    }
+
+    return config_cost;
+  }
+
+private:
+  void compute_best_costs_for_all_configs( uint32_t current_gid, double cost_so_far, std::unordered_map<depth_config_t, double>& config_cost )
+  {
+    if ( net.nodes.size() == current_gid )
+    {
+      depth_config_t depth_config = 0u;
+      uint32_t ind = 0;
+      for ( auto f : net.input_slots )
+      {
+        if ( f == net.zero_input )
         {
           continue;
         }
 
-        // lconfig = ( lconfig << 8 ) + ctx.curlev[f];
-        lconfig |= ( ctx.curlev[f] << ( 8 * ind ) );
+        depth_config |= ( curlev[f] << ( 8 * ind ) );
         ind++;
       }
 
-      if ( !config_cost.count( lconfig ) )
+      if ( !config_cost.count( depth_config ) )
       {
-        config_cost[lconfig] = IMPOSSIBLE;
+        config_cost[depth_config] = IMPOSSIBLE;
       }
 
-      config_cost[lconfig] = std::min( config_cost[lconfig], cost_so_far );
+      config_cost[depth_config] = std::min( config_cost[depth_config], cost_so_far );
       return;
     }
 
-    if ( ctx.net.zero_input == (typename Ntk::node_type)current_gid )
+    if ( net.zero_input == (typename Ntk::node_type)current_gid )
     {
-      compute_best_costs_for_all_configs( ctx, current_gid + 1, cost_so_far, config_cost );
+      compute_best_costs_for_all_configs( current_gid + 1, cost_so_far, config_cost );
       return;
     }
 
-    for ( auto lev = ctx.minlev[current_gid]; lev <= ctx.maxlev[current_gid]; lev++ )
+    for ( auto lev = minlev[current_gid]; lev <= maxlev[current_gid]; lev++ )
     {
-      auto cost = cost_for_node_if_in_level( ctx, lev, ctx.fanout[current_gid] );
+      auto cost = cost_for_node_if_in_level( lev, fanout[current_gid] );
       if ( cost >= IMPOSSIBLE )
       {
         continue;
       }
-      ctx.curlev[current_gid] = lev;
-      compute_best_costs_for_all_configs( ctx, current_gid + 1, cost_so_far + cost, config_cost );
+      curlev[current_gid] = lev;
+      compute_best_costs_for_all_configs( current_gid + 1, cost_so_far + cost, config_cost );
     }
   }
 };

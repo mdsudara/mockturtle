@@ -13,6 +13,7 @@
 #include <fmt/format.h>
 
 #include "./dag.hpp"
+#include "./dag_builder.hpp"
 #include "./gen_dag_util.hpp"
 
 namespace mockturtle
@@ -49,52 +50,50 @@ struct dag_generator_params
                            verbose( 0u ) {}
 };
 
-template<typename CostComputerT>
+template<typename CostFn>
 class dag_compare
 {
 public:
-  dag_compare( CostComputerT cc ) : cc( cc )
+  dag_compare( CostFn cc ) : cc( cc )
   {
   }
 
-  /**
-   * \brief Returns true if s should appear before f.
+  /*! \brief Returns true if s should appear before f.
+   *
    * This happens if s has a smaller cost or if s has the same cost as f
    * but s is a DAG whereas f is partial DAG.
    */
-  template<typename Ntk>
-  bool operator()( Ntk& f, Ntk& s )
+  template<typename T>
+  bool operator()( T& f, T& s )
   {
-    auto cf = cc( f );
-    auto cs = cc( s );
-    return ( cf > cs ) || ( cf == cs && !s.is_partial_dag && f.is_partial_dag );
+    return ( f.second > s.second ) || ( f.second == s.second && !s.first.is_partial_dag && f.first.is_partial_dag );
   }
 
 private:
-  CostComputerT cc;
+  CostFn cc;
 };
 
-template<typename NodeT, typename CostComputerT>
+template<typename NodeT, typename CostFn>
 class dag_generator
 {
-  using Ntk = aqfp_logical_network_t<NodeT>;
+  using NtkBuilder = aqfp_dag_builder<NodeT>;
+  using Ntk = aqfp_dag<NodeT>;
 
 public:
-  dag_generator( const dag_generator_params& params, CostComputerT cc ) : params( params ), cc( cc ), pq( dag_compare( cc ) )
+  dag_generator( const dag_generator_params& params, CostFn cc ) : params( params ), cc( cc ), pq( dag_compare( cc ) )
   {
     for ( auto&& fin : params.allowed_num_fanins )
     {
       if ( params.max_gates_of_fanin.at( fin ) > 0 )
       {
-        auto root = aqfp_logical_network_t<int>::get_root( fin );
-        root.pdag_id = ( ++next_pdag_id );
-        pq.push( root );
+        auto root = NtkBuilder::get_root( fin );
+        pq.push( { root, cc( root ) } );
       }
     }
   }
 
   template<typename PredicateT>
-  std::optional<Ntk> next_dag( PredicateT&& should_expand )
+  std::optional<std::pair<Ntk, double>> next_dag( PredicateT&& should_expand )
   {
     while ( true )
     {
@@ -103,17 +102,18 @@ public:
         return std::nullopt;
       }
 
-      auto res = pq.top();
+      auto [res, res_cost] = pq.top();
       pq.pop();
 
       if ( !res.is_partial_dag )
       {
-        return res;
+        return {{ res, res_cost} };
       }
 
       if ( params.max_levels > res.num_levels )
       {
         auto ext = get_layer_extension( res );
+        std::vector<double> costs( ext.size() );
 
         if ( params.allow_par_costing )
         {
@@ -125,28 +125,26 @@ public:
             for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
             {
               temp.push_back( std::async(
-                  std::launch::async,
-                  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( ext[j] ) ) );
+                  std::launch::async, [&]( NtkBuilder& item ) { return cc( item ); }, std::ref( ext[j] ) ) );
             }
 
             for ( auto j = i; j < i + block_size && j < ext.size(); j++ )
             {
-              ext[j].computed_cost = temp[j - i].get();
+              costs[j] = temp[j - i].get();
             }
           }
         }
 
-        for ( auto&& t : ext )
+        for ( auto i = 0u; i < ext.size(); i++ )
         {
-          t.pdag_id = ( ++next_pdag_id );
-          pq.push( t );
+          pq.push( { ext[i], costs[i] } );
         }
       }
 
       if ( should_expand( res ) )
       {
-
         auto dags = get_dags_from_partial_dag( res );
+        std::vector<double> costs(dags.size());
 
         if ( params.allow_par_costing )
         {
@@ -157,22 +155,19 @@ public:
             std::vector<std::future<double>> temp;
             for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
             {
-              temp.push_back( std::async(
-                  std::launch::async,
-                  [&]( Ntk& item ) { cc( item ); return item.computed_cost; }, std::ref( dags[j] ) ) );
+              temp.push_back( std::async( std::launch::async, [&]( NtkBuilder& item ) { return cc( item ); }, std::ref( dags[j] ) ) );
             }
 
             for ( auto j = i; j < i + block_size && j < dags.size(); j++ )
             {
-              dags[j].computed_cost = temp[j - i].get();
+              costs[j] = temp[j - i].get();
             }
           }
         }
 
-        for ( auto&& t : dags )
+        for ( auto i = 0u; i < dags.size(); i++ )
         {
-          t.pdag_id = res.pdag_id;
-          pq.push( t );
+          pq.push( {dags[i], costs[i]} );
         }
       }
 
@@ -183,23 +178,21 @@ public:
     }
   }
 
-  std::optional<Ntk> next_dag()
+  std::optional<std::pair<Ntk, double>> next_dag()
   {
-    static auto always_expand = []( Ntk& net ) { (void) net; return true; };
+    static auto always_expand = []( auto& net ) { (void) net; return true; };
     return next_dag( always_expand );
   }
 
-  /**
-   * \brief Extend the current aqfp logical network by one more level.
-   */
-  std::vector<Ntk> get_layer_extension( const Ntk& net )
+  /*! \brief Extend the current aqfp logical network by one more level. */
+  std::vector<NtkBuilder> get_layer_extension( const NtkBuilder& net )
   {
     // Choose which last layer slots to use
     // Choose which non-last later slots to use
     // get partitions of the chosen last layer slots
     // extend the partitions using chosen non-last layer slots
 
-    std::vector<Ntk> result;
+    std::vector<NtkBuilder> result;
 
     auto max_counts = net.max_equal_fanins();
 
@@ -278,7 +271,7 @@ public:
   /**
    * @brief Compute all DAGs derived from a given partial DAG.
    */
-  std::vector<Ntk> get_dags_from_partial_dag( const Ntk& net )
+  std::vector<NtkBuilder> get_dags_from_partial_dag( const NtkBuilder& net )
   {
     std::vector<NodeT> leaves = net.last_layer_leaves;
     leaves.insert( leaves.end(), net.other_leaves.begin(), net.other_leaves.end() );
@@ -289,7 +282,7 @@ public:
 
     auto partitions = partition_gen( leaves, max_counts, params.max_num_in, 0 /* unlimited part sizes (fanouts) */ );
 
-    std::vector<Ntk> result;
+    std::vector<NtkBuilder> result;
     for ( auto p : partitions )
     {
       auto new_net = get_next_dag( net, p );
@@ -311,7 +304,7 @@ public:
    * indicated by partitioning 'p'. We have to try different gate types for each part
    * in partition 'p'.
    */
-  std::vector<Ntk> get_next_partial_dags( const Ntk& orig, const partition& p, const std::vector<int>& other_leaves )
+  std::vector<NtkBuilder> get_next_partial_dags( const NtkBuilder& orig, const partition& p, const std::vector<int>& other_leaves )
   {
     auto max_allowed_of_fanin = params.max_gates_of_fanin;
     for ( auto it = orig.num_gates_of_fanin.begin(); it != orig.num_gates_of_fanin.end(); it++ )
@@ -336,14 +329,14 @@ public:
   /**
    * \brief Recursively consider different fanin gates for different parts in partition 'p'.
    */
-  std::vector<Ntk> add_node_recur( const Ntk& orig, const std::vector<part>& p, uint32_t ind, std::map<uint32_t, uint32_t>& max_allowed_of_fanin )
+  std::vector<NtkBuilder> add_node_recur( const NtkBuilder& orig, const std::vector<part>& p, uint32_t ind, std::map<uint32_t, uint32_t>& max_allowed_of_fanin )
   {
     if ( ind == p.size() )
     {
       return { orig.copy_without_leaves() };
     }
 
-    std::vector<Ntk> res;
+    std::vector<NtkBuilder> res;
 
     /* Decide what fanin gate to use for part in partition 'p' at index 'ind'. */
     for ( auto&& fin : params.allowed_num_fanins )
@@ -373,7 +366,7 @@ public:
    * \brief Compute the DAG obtained from partial DAG 'orig' by combining slots
    * according to partitions 'p'.
    */
-  Ntk get_next_dag( const Ntk& orig, const partition& p )
+  NtkBuilder get_next_dag( const NtkBuilder& orig, const partition& p )
   {
     assert( orig.is_partial_dag );
 
@@ -388,8 +381,8 @@ private:
   uint32_t next_pdag_id = 0u;
 
   dag_generator_params params;
-  CostComputerT cc;
-  std::priority_queue<Ntk, std::vector<Ntk>, dag_compare<CostComputerT>> pq;
+  CostFn cc;
+  std::priority_queue<std::pair<NtkBuilder, double>, std::vector<std::pair<NtkBuilder, double>>, dag_compare<CostFn>> pq;
 
   detail::partition_generator<NodeT> partition_gen;
   detail::partition_extender<NodeT> partition_ext;
