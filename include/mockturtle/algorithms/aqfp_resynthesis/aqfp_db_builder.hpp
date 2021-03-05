@@ -78,7 +78,7 @@ public:
   }
 
   /*! Filter database configurations that are "covered" by other configurations. */
-  void remove_redundant()
+  void remove_redundant( bool verbose = false )
   {
     for ( auto i = db.begin(); i != db.end(); i++ )
     {
@@ -115,8 +115,11 @@ public:
             }
             if ( extra_buff_cost + jt->second.cost <= it->second.cost )
             {
-              fmt::print( "[aqfp_db] configuration {:04x} already covered by {:04x} [{} {} {}].\n",
-                          it->first, jt->first, it->second.cost, jt->second.cost, extra_buff_cost );
+              if ( verbose )
+              {
+                std::cerr << fmt::format( "[aqfp_db] configuration {:04x} already covered by {:04x} [{} {} {}].\n",
+                                          it->first, jt->first, it->second.cost, jt->second.cost, extra_buff_cost );
+              }
               ok = false;
               break;
             }

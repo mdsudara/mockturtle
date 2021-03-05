@@ -115,6 +115,8 @@ public:
     stopwatch t( st.time_total );
 
     node_map<signal<NtkDest>, NtkSrc> node2new( ntk_src );
+    node_map<uint32_t, NtkSrc> level_of_src_node( ntk_src );
+
     std::unordered_map<node<NtkDest>, uint32_t> level_of_node;
     std::map<std::pair<node<NtkSrc>, node<NtkSrc>>, uint32_t> level_for_fanout;
     uint32_t critical_po_level = 0;
@@ -174,6 +176,7 @@ public:
       } );
 
       auto performed_resyn = false;
+
       auto level_update_callback =
           [&]( const auto& n, uint32_t level ) {
             if ( !level_of_node.count( n ) )
@@ -183,8 +186,9 @@ public:
           };
 
       auto resyn_performed_callback =
-          [&]( const auto& f ) {
+          [&]( const auto& f, auto new_level ) {
             node2new[n] = f;
+            level_of_src_node[n] = new_level;
 
             if constexpr ( has_has_name_v<NtkSrc> && has_get_name_v<NtkSrc> && has_set_name_v<NtkDest> )
             {
@@ -194,6 +198,7 @@ public:
 
             performed_resyn = true;
           };
+
       node_resyn_fn( ntk_dest, ntk_src.node_function( n ), children.begin(), children.end(), level_update_callback, resyn_performed_callback );
 
       if ( !performed_resyn )
@@ -212,7 +217,7 @@ public:
         critical_po_level = std::max( critical_po_level, level );
       };
 
-      fanout_resyn_fn( ntk_topo, n, ntk_dest, node2new[n], level_of_node[ntk_dest.get_node( node2new[n] )], fanout_node_callback, fanout_po_callback );
+      fanout_resyn_fn( ntk_topo, n, ntk_dest, node2new[n], level_of_src_node[n], fanout_node_callback, fanout_po_callback );
     } );
 
     /* map primary outputs */

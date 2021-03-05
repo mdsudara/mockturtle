@@ -14,7 +14,7 @@ namespace mockturtle
 {
 
 template<typename NodeT = int>
-struct aqfp_dag_builder : public aqfp_dag<NodeT>
+struct aqfp_partial_dag : public aqfp_dag<NodeT>
 {
   using node_type = NodeT;
 
@@ -23,7 +23,6 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
   using aqfp_dag<node_type>::zero_input;
   using aqfp_dag<node_type>::num_gates;
 
-  bool is_partial_dag = false; // is this a partial DAG?
   uint32_t num_levels = 0u;    // current number of levels
 
   std::unordered_map<uint32_t, uint32_t> num_gates_of_fanin;
@@ -31,25 +30,23 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
   std::vector<node_type> last_layer_leaves; // remaining fanin slots in the last layer
   std::vector<node_type> other_leaves;      // remaining fanin slots of the other layers
 
-  aqfp_dag_builder(
+  aqfp_partial_dag(
       const std::vector<std::vector<NodeT>>& nodes = {},
       const std::vector<NodeT>& input_slots = {},
       node_type zero_input = {},
-      bool is_partial_dag = false,
       uint32_t num_levels = 0u,
       const std::unordered_map<uint32_t, uint32_t>& num_gates_of_fanin = {},
       const std::vector<uint32_t>& node_num_fanin = {},
       const std::vector<node_type>& last_layer_leaves = {},
       const std::vector<node_type>& other_leaves = {} )
       : aqfp_dag<node_type>( nodes, input_slots, zero_input ),
-        is_partial_dag( is_partial_dag ),
         num_levels( num_levels ),
         num_gates_of_fanin( num_gates_of_fanin ),
         node_num_fanin( node_num_fanin ),
         last_layer_leaves( last_layer_leaves ),
         other_leaves( other_leaves ) {}
 
-  aqfp_dag_builder( const std::string& str )
+  aqfp_partial_dag( const std::string& str )
   {
     decode_from_string( str );
   }
@@ -61,7 +58,6 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
    */
   void decode_from_string( const std::string& str )
   {
-    is_partial_dag = 0;
     num_levels = 0;
 
     std::istringstream iss( str );
@@ -163,14 +159,13 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
   }
 
   /*! \brief Make a copy  with empty last_layer_leaves and other_leaves. */
-  aqfp_dag_builder copy_without_leaves() const
+  aqfp_partial_dag copy_without_leaves() const
   {
-    aqfp_dag_builder res{
+    aqfp_partial_dag res{
         nodes,
         input_slots,
         zero_input,
 
-        is_partial_dag,
         num_levels,
 
         num_gates_of_fanin,
@@ -183,14 +178,13 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
   }
 
   /*! \brief Make a copy  with empty other_leaves. */
-  aqfp_dag_builder copy_with_last_layer_leaves() const
+  aqfp_partial_dag copy_with_last_layer_leaves() const
   {
-    aqfp_dag_builder res{
+    aqfp_partial_dag res{
         nodes,
         input_slots,
         zero_input,
 
-        is_partial_dag,
         num_levels,
 
         num_gates_of_fanin,
@@ -202,12 +196,11 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
     return res;
   }
 
-  /*! \brief Create a aqfp_dag_builder with a single gate of a given number of fanins. */
-  static aqfp_dag_builder get_root( uint32_t num_fanin )
+  /*! \brief Create a aqfp_partial_dag with a single gate of a given number of fanins. */
+  static aqfp_partial_dag get_root( uint32_t num_fanin )
   {
-    aqfp_dag_builder net;
+    aqfp_partial_dag net;
 
-    net.is_partial_dag = true;
     net.num_levels = 1u;
 
     std::multiset<NodeT> fanouts = {};

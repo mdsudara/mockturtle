@@ -13,7 +13,7 @@
 #include <fmt/format.h>
 
 #include "./dag.hpp"
-#include "./dag_builder.hpp"
+#include "./partial_dag.hpp"
 #include "./gen_dag_util.hpp"
 
 namespace mockturtle
@@ -51,13 +51,13 @@ struct dag_generator_params
 template<typename NodeT = int>
 class dags_from_partial_dag
 {
-  using NtkBuilder = aqfp_dag_builder<NodeT>;
+  using PartialNtk = aqfp_partial_dag<NodeT>;
   using Ntk = aqfp_dag<NodeT>;
 
 public:
   dags_from_partial_dag( uint32_t max_num_in, uint32_t max_num_fanout ) : max_num_in( max_num_in ), max_num_fanout( max_num_fanout ) {}
 
-  std::vector<Ntk> operator()( const NtkBuilder& net )
+  std::vector<Ntk> operator()( const PartialNtk& net )
   {
     std::vector<NodeT> leaves = net.last_layer_leaves;
     leaves.insert( leaves.end(), net.other_leaves.begin(), net.other_leaves.end() );
@@ -108,7 +108,7 @@ private:
    * \brief Compute the DAG obtained from partial DAG `orig` by combining slots
    * according to partitions `p`.
    */
-  Ntk get_dag_for_partition( const NtkBuilder& orig, const partition& p )
+  Ntk get_dag_for_partition( const PartialNtk& orig, const partition& p )
   {
     auto net = orig.copy_without_leaves();
     std::for_each( p.begin(), p.end(), [&net]( const auto& q ) { net.add_leaf_node( q ); } );
@@ -120,7 +120,7 @@ private:
 template<typename NodeT = int>
 class dag_generator
 {
-  using NtkBuilder = aqfp_dag_builder<NodeT>;
+  using PartialNtk = aqfp_partial_dag<NodeT>;
 
 public:
   dag_generator( const dag_generator_params& params, uint32_t num_threads = 1u ) : params( params ), num_threads( num_threads ) {}
@@ -179,7 +179,7 @@ private:
   dag_generator_params params;
   uint32_t num_threads;
 
-  std::queue<NtkBuilder> partial_dags;
+  std::queue<PartialNtk> partial_dags;
 
   detail::partition_generator<NodeT> partition_gen;
   detail::partition_extender<NodeT> partition_ext;
@@ -187,13 +187,13 @@ private:
 
   void generate_all_partial_dags()
   {
-    std::stack<NtkBuilder> stk;
+    std::stack<PartialNtk> stk;
 
     for ( auto&& fin : params.allowed_num_fanins )
     {
       if ( params.max_gates_of_fanin.at( fin ) > 0 )
       {
-        auto root = NtkBuilder::get_root( fin );
+        auto root = PartialNtk::get_root( fin );
         stk.push( root );
       }
     }
@@ -217,9 +217,9 @@ private:
   }
 
   /*! \brief Extend the current aqfp logical network by one more level. */
-  std::vector<NtkBuilder> get_layer_extension( const NtkBuilder& net )
+  std::vector<PartialNtk> get_layer_extension( const PartialNtk& net )
   {
-    std::vector<NtkBuilder> result;
+    std::vector<PartialNtk> result;
 
     auto max_counts = net.max_equal_fanins();
 
@@ -300,7 +300,7 @@ private:
   /*! \brief Compute the partial DAGs obtained by combining the slots of `orig` as indicated by 
    *  partitioning 'p'. 
    */
-  std::vector<NtkBuilder> get_next_partial_dags( const NtkBuilder& orig, const partition& p, const std::vector<int>& other_leaves )
+  std::vector<PartialNtk> get_next_partial_dags( const PartialNtk& orig, const partition& p, const std::vector<int>& other_leaves )
   {
     auto max_allowed_of_fanin = params.max_gates_of_fanin;
     for ( auto it = orig.num_gates_of_fanin.begin(); it != orig.num_gates_of_fanin.end(); it++ )
@@ -323,14 +323,14 @@ private:
   }
 
   /*! \brief Recursively consider gates with different number of fanins for different parts in partition `p`. */
-  std::vector<NtkBuilder> add_node_recur( const NtkBuilder& orig, const std::vector<part>& p, uint32_t ind, std::unordered_map<uint32_t, uint32_t>& max_allowed_of_fanin )
+  std::vector<PartialNtk> add_node_recur( const PartialNtk& orig, const std::vector<part>& p, uint32_t ind, std::unordered_map<uint32_t, uint32_t>& max_allowed_of_fanin )
   {
     if ( ind == p.size() )
     {
       return { orig };
     }
 
-    std::vector<NtkBuilder> res;
+    std::vector<PartialNtk> res;
 
     /* Decide what fanin gate to use for part in partition 'p' at index 'ind'. */
     for ( auto&& fin : params.allowed_num_fanins )

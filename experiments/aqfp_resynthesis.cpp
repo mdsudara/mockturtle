@@ -55,21 +55,21 @@ std::vector<std::string> mcnc = {
     "5xp1.v",
     "c1908.v",
     "c432.v",
-    // "c5315.v",
-    // "c880.v",
-    // "chkn.v",
-    // "count.v",
-    // "dist.v",
-    // "in5.v",
-    // "in6.v",
-    // "k2.v",
-    // "m3.v",
-    // "max512.v",
-    // "misex3.v",
-    // "mlp4.v",
-    // "prom2.v",
-    // "sqr6.v",
-    // "x1dn.v",
+    "c5315.v",
+    "c880.v",
+    "chkn.v",
+    "count.v",
+    "dist.v",
+    "in5.v",
+    "in6.v",
+    "k2.v",
+    "m3.v",
+    "max512.v",
+    "misex3.v",
+    "mlp4.v",
+    "prom2.v",
+    "sqr6.v",
+    "x1dn.v",
 };
 
 template<class Ntk>
@@ -128,7 +128,7 @@ void experiment_aqfp_exact_syn( std::unordered_map<uint32_t, double>& gate_costs
   mockturtle::aqfp_node_resyn node_resyn_lvl( db, { splitters, mockturtle::aqfp_node_resyn_strategy::level_based } );
   mockturtle::aqfp_fanout_resyn fanout_resyn( 4u );
 
-  experiments::experiment<std::string, uint32_t, double, uint32_t, double, uint32_t, double, uint32_t, double> exp( "aqfp_resynthesis", "benchmark", "#JJ (C01)", "LVL (C01)", "#JJ (C10)", "LVL (C10)", "#JJ (L01)", "LVL (L01)", "#JJ (L10)", "LVL (L10)" );
+  experiments::experiment<std::string, double, uint32_t, double, uint32_t, double, uint32_t, double, uint32_t> exp( "aqfp_resynthesis", "benchmark", "#JJ (C01)", "LVL (C01)", "#JJ (C10)", "LVL (C10)", "#JJ (L01)", "LVL (L01)", "#JJ (L10)", "LVL (L10)" );
 
   for ( auto b : benchmarks )
   {
@@ -145,7 +145,7 @@ void experiment_aqfp_exact_syn( std::unordered_map<uint32_t, double>& gate_costs
     /* 1. Apply cost-based AQFP resynthesis once */
     mockturtle::aqfp_network opt_aqfp;
     auto res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_orig, node_resyn_cst, fanout_resyn );
-    std::pair<double, uint32_t> res_orig_cst = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
+    std::pair<double, uint32_t> res_orig_cst = { cost_fn( opt_aqfp, res.node_level, res.po_level ), res.po_level };
 
     /* 2. Repeatedly apply cost-based AQFP resynthesis */
     auto res_opt_cst = res_orig_cst;
@@ -155,7 +155,7 @@ void experiment_aqfp_exact_syn( std::unordered_map<uint32_t, double>& gate_costs
 
       opt_aqfp = mockturtle::aqfp_network();
       res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_opt, node_resyn_cst, fanout_resyn );
-      std::pair<double, uint32_t> res_temp = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
+      std::pair<double, uint32_t> res_temp = { cost_fn( opt_aqfp, res.node_level, res.po_level ), res.po_level };
 
       if ( has_better_cost( res_temp, res_opt_cst ) )
       {
@@ -168,7 +168,7 @@ void experiment_aqfp_exact_syn( std::unordered_map<uint32_t, double>& gate_costs
     /* 3. Apply level-based AQFP resynthesis once */
     opt_aqfp = mockturtle::aqfp_network();
     res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_orig, node_resyn_lvl, fanout_resyn );
-    std::pair<double, uint32_t> res_orig_lvl = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
+    std::pair<double, uint32_t> res_orig_lvl = { cost_fn( opt_aqfp, res.node_level, res.po_level ), res.po_level };
 
     /* 4. Repeatedly apply level-based AQFP resynthesis */
     auto res_opt_lvl = res_orig_lvl;
@@ -178,13 +178,15 @@ void experiment_aqfp_exact_syn( std::unordered_map<uint32_t, double>& gate_costs
 
       opt_aqfp = mockturtle::aqfp_network();
       res = mockturtle::aqfp_resynthesis( opt_aqfp, klut_opt, node_resyn_lvl, fanout_resyn );
-      std::pair<double, uint32_t> res_temp = { res.po_level, cost_fn( opt_aqfp, res.node_level, res.po_level ) };
+      std::pair<double, uint32_t> res_temp = { cost_fn( opt_aqfp, res.node_level, res.po_level ), res.po_level };
 
       if ( has_better_level( res_temp, res_opt_lvl ) )
       {
         res_opt_lvl = res_temp;
       }
     }
+
+    assert( abc_cec_aqfp( opt_aqfp, benchmark ) );
 
     exp( b, res_orig_cst.first, res_orig_cst.second, res_opt_cst.first, res_opt_cst.second, res_orig_lvl.first, res_orig_lvl.second, res_opt_lvl.first, res_opt_lvl.second );
   }

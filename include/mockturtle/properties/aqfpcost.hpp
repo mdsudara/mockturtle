@@ -180,8 +180,6 @@ struct aqfp_network_cost
     }
 
     return gate_cost + fanout_net_cost;
-
-    return 0.0;
   }
 
 private:

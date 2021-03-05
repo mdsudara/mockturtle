@@ -44,8 +44,8 @@ struct aqfp_node_resyn
   {
     static_assert( std::is_invocable_v<LevelUpdateCallback, node<NtkDest>, uint32_t>,
                    "LevelUpdateCallback must be callable with arguments of types (node<NtkDest>, level)" );
-    static_assert( std::is_invocable_v<ResynPerformedCallback, signal<NtkDest>>,
-                   "ResynPerformedCallback must be callable with an argument of type signal<NtkDest>" );
+    static_assert( std::is_invocable_v<ResynPerformedCallback, signal<NtkDest>, uint32_t>,
+                   "ResynPerformedCallback must be callable with arguments of type (signal<NtkDest>, level)" );
 
     std::vector<signal<NtkDest>> leaves;
     std::vector<uint32_t> leaf_levels;
@@ -74,6 +74,7 @@ struct aqfp_node_resyn
     auto tt = kitty::extend_to( f, 4u );
 
     auto new_n = ntk_dest.get_constant( false );
+    auto n_lev = 0u;
     switch ( tt._bits[0] )
     {
     case 0x0000u:
@@ -84,27 +85,35 @@ struct aqfp_node_resyn
       break;
     case 0x5555u:
       new_n = !leaves[0];
+      n_lev = leaf_levels[0];
       break;
     case 0xaaaau:
       new_n = leaves[0];
+      n_lev = leaf_levels[0];
       break;
     case 0x3333u:
       new_n = !leaves[1];
+      n_lev = leaf_levels[1];
       break;
     case 0xccccu:
       new_n = leaves[1];
+      n_lev = leaf_levels[1];
       break;
     case 0x0f0fu:
       new_n = !leaves[2];
+      n_lev = leaf_levels[2];
       break;
     case 0xf0f0u:
       new_n = leaves[2];
+      n_lev = leaf_levels[2];
       break;
     case 0x00ffu:
       new_n = !leaves[3];
+      n_lev = leaf_levels[3];
       break;
     case 0xff00u:
       new_n = leaves[3];
+      n_lev = leaf_levels[3];
       break;
     default:
       auto [mig, depths, output_inv] = db.get_best_replacement(
@@ -156,11 +165,11 @@ struct aqfp_node_resyn
 
         level_update_callback( ntk_dest.get_node( sig_map[i] ), lev_map[i] );
       }
-
+      n_lev = lev_map[mig.size() - 1];
       new_n = output_inv ? !sig_map[mig.size() - 1] : sig_map[mig.size() - 1];
     }
 
-    resyn_performed_callback( new_n );
+    resyn_performed_callback( new_n, n_lev );
   }
 
 private:
