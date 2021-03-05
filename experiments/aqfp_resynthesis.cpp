@@ -19,7 +19,7 @@
 #include <mockturtle/views/fanout_view.hpp>
 
 #include <mockturtle/algorithms/aqfp_resynthesis.hpp>
-#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db_builder.hpp>
+#include <mockturtle/algorithms/aqfp_resynthesis/aqfp_db.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/aqfp_fanout_resyn.hpp>
 #include <mockturtle/algorithms/aqfp_resynthesis/aqfp_node_resyn.hpp>
 
@@ -203,15 +203,15 @@ int main( int argc, char** argv )
   std::unordered_map<uint32_t, double> gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } };
   std::unordered_map<uint32_t, double> splitters = { { 1u, 2.0 }, { 4u, 2.0 } };
 
-  mockturtle::aqfp_db_builder<> builder( gate_costs, splitters );
+  mockturtle::aqfp_db<> db( gate_costs, splitters );
 
   std::ifstream db_file( "aqfp_db.txt" );
   assert( db_file.is_open() );
-  builder.load_db_from_file( db_file );
+  db.load_db_from_file( db_file );
   db_file.close();
 
   // mockturtle::aqfp_db<> db( gate_costs, splitters );
-  auto db = builder.build();
+  // auto db = builder.build();
 
   experiment_aqfp_exact_syn( gate_costs, splitters, db, mcnc );
 

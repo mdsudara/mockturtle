@@ -1,18 +1,11 @@
 #pragma once
 
-#include <chrono>
-#include <future>
-#include <iostream>
-#include <limits>
 #include <map>
 #include <set>
-#include <sstream>
 #include <unordered_map>
 #include <vector>
 
-#include <fmt/format.h>
-
-#include "../../utils/hash_functions.hpp"
+#include "../../../utils/hash_functions.hpp"
 
 namespace mockturtle
 {
@@ -20,9 +13,11 @@ namespace mockturtle
 namespace detail
 {
 
-/*! \brief Computes and returns the frequency map for a given collection of elements. */
+/*! \brief Computes and returns the frequency map for a given collection of elements. 
+ *  Use std::map instead of std::unordered_map because we use it as a key in a hash-table so the order is important to compute the hash 
+ */
 template<typename ElemT>
-inline auto get_frequencies( const std::vector<ElemT>& elems )
+inline std::map<ElemT, uint32_t> get_frequencies( const std::vector<ElemT>& elems )
 {
   std::map<ElemT, uint32_t> elem_counts;
   std::for_each( elems.begin(), elems.end(), [&elem_counts]( auto e ) { elem_counts[e]++; } );

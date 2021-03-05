@@ -4,10 +4,7 @@
 #include <unordered_map>
 #include <vector>
 
-#include <fmt/format.h>
-
-#include "../../properties/aqfpcost.hpp"
-#include "./dag.hpp"
+#include "../../../properties/aqfpcost.hpp"
 
 namespace mockturtle
 {

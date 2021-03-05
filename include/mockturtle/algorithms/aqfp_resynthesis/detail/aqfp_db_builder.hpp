@@ -1,16 +1,18 @@
 #pragma once
 
 #include <iostream>
+#include <fstream>
 #include <map>
 #include <unordered_map>
 #include <vector>
 
 #include <kitty/kitty.hpp>
 
-#include "./aqfp_db.hpp"
 #include "./dag.hpp"
 #include "./dag_cost.hpp"
 #include "./npn_cache.hpp"
+
+#include "../aqfp_db.hpp"
 
 namespace mockturtle
 {
@@ -193,49 +195,10 @@ public:
   /*! \brief Load database from input stream `is`. */
   void load_db_from_file( std::istream& is )
   {
-    std::string line;
-
-    std::getline( is, line );
-    uint32_t num_func = std::stoul( line );
-
-    for ( auto func = 0u; func < num_func; func++ )
-    {
-      std::getline( is, line );
-      uint64_t npn = std::stoul( line, 0, 16 );
-
-      std::getline( is, line );
-      uint32_t num_entries = std::stoul( line );
-
-      for ( auto j = 0u; j < num_entries; j++ )
-      {
-        std::getline( is, line );
-        uint64_t lvl_cfg = std::stoul( line, 0, 16 );
-        auto levels = lvl_cfg_to_vec( lvl_cfg, N );
-
-        std::getline( is, line );
-        double cost = std::stod( line );
-
-        std::getline( is, line );
-        Ntk ntk( line );
-
-        std::vector<uint32_t> perm( N );
-        for ( int i = 0; i < N; i++ )
-        {
-          uint32_t t;
-          is >> t;
-          perm[i] = t;
-        }
-        std::getline( is, line ); // ignore the current line end
-
-        lvl_cfg = lvl_cfg_from_vec( levels );
-
-        if ( !db[npn].count( lvl_cfg ) || db[npn][lvl_cfg].cost > cost )
-        {
-          db[npn][lvl_cfg] = { cost, ntk, levels, perm };
-        }
-      }
-    }
+    aqfp_db<Ntk,N>::load_db_from_file(is, db);
   }
+
+
 
 private:
   std::unordered_map<uint32_t, double> gate_costs;

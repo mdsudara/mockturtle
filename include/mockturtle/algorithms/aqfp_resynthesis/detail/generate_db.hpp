@@ -1,8 +1,6 @@
 #pragma once
 
-#include <functional>
 #include <iostream>
-#include <mutex>
 #include <thread>
 
 #include <kitty/kitty.hpp>

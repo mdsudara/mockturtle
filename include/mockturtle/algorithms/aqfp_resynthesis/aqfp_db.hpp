@@ -1,15 +1,14 @@
 #pragma once
 
-#include <iostream>
 #include <map>
 #include <unordered_map>
 #include <vector>
 
 #include <kitty/kitty.hpp>
 
-#include "./dag.hpp"
-#include "./dag_cost.hpp"
-#include "./npn_cache.hpp"
+#include "./detail/dag.hpp"
+#include "./detail/dag_cost.hpp"
+#include "./detail/npn_cache.hpp"
 
 namespace mockturtle
 {
@@ -148,11 +147,65 @@ public:
     return compute_replacement_structure( best, f );
   }
 
+  /*! \brief Load database from input stream `is`. */
+  void load_db_from_file( std::istream& is )
+  {
+    load_db_from_file(is, db);
+  }
+
+    /*! \brief Load database from input stream `is`. */
+  template <typename T>
+  static void load_db_from_file( std::istream& is, T& db )
+  {
+    std::string line;
+
+    std::getline( is, line );
+    uint32_t num_func = std::stoul( line );
+
+    for ( auto func = 0u; func < num_func; func++ )
+    {
+      std::getline( is, line );
+      uint64_t npn = std::stoul( line, 0, 16 );
+
+      std::getline( is, line );
+      uint32_t num_entries = std::stoul( line );
+
+      for ( auto j = 0u; j < num_entries; j++ )
+      {
+        std::getline( is, line );
+        uint64_t lvl_cfg = std::stoul( line, 0, 16 );
+        auto levels = lvl_cfg_to_vec( lvl_cfg, N );
+
+        std::getline( is, line );
+        double cost = std::stod( line );
+
+        std::getline( is, line );
+        Ntk ntk( line );
+
+        std::vector<uint32_t> perm( N );
+        for ( int i = 0; i < N; i++ )
+        {
+          uint32_t t;
+          is >> t;
+          perm[i] = t;
+        }
+        std::getline( is, line ); // ignore the current line end
+
+        lvl_cfg = lvl_cfg_from_vec( levels );
+
+        if ( !db[npn].count( lvl_cfg ) || db[npn][lvl_cfg].cost > cost )
+        {
+          db[npn][lvl_cfg] = { cost, ntk, levels, perm };
+        }
+      }
+    }
+  }
+
 private:
   std::unordered_map<uint32_t, double> gate_costs;
   std::unordered_map<uint32_t, double> splitters;
   std::unordered_map<uint64_t, std::map<uint64_t, replacement>> db;
-  mockturtle::dag_aqfp_cost_and_depths<Ntk> cc;
+  dag_aqfp_cost_and_depths<Ntk> cc;
   npn_cache<N> npndb;
 
   std::pair<bool, std::vector<uint32_t>> inverter_config_for_func( const std::vector<uint64_t>& input_tt, const Ntk& net, uint64_t func )
