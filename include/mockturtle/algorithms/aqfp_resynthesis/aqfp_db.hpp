@@ -71,7 +71,7 @@ public:
   aqfp_db(
       const std::unordered_map<uint32_t, double>& gate_costs = { { 3u, 6.0 }, { 5u, 10.0 } },
       const std::unordered_map<uint32_t, double>& splitters = { { 1u, 2.0 }, { 4u, 2.0 } } )
-      : gate_costs( gate_costs ), splitters( splitters ), db(get_default_db()), cc( gate_costs, splitters )
+      : gate_costs( gate_costs ), splitters( splitters ), db( get_default_db() ), cc( gate_costs, splitters )
   {
     static_assert( N == 4u, "Template parameter N must be 4 in the current implementation." );
   }
@@ -155,7 +155,7 @@ private:
   mockturtle::dag_aqfp_cost_and_depths<Ntk> cc;
   npn_cache<N> npndb;
 
-  std::vector<uint32_t> inverter_config_for_func( const std::vector<uint64_t>& input_tt, const Ntk& net, uint64_t func )
+  std::pair<bool, std::vector<uint32_t>> inverter_config_for_func( const std::vector<uint64_t>& input_tt, const Ntk& net, uint64_t func )
   {
     uint32_t num_inputs = net.input_slots.size();
     if ( net.zero_input != 0 )
@@ -178,25 +178,56 @@ private:
       }
     }
 
-    for ( auto inv_config = 0ul; inv_config < ( 1ul << ( 2 * net.num_gates() ) ); inv_config++ )
+    auto shift = 0u;
+    for ( auto i = 0u; i < net.num_gates(); i++ )
     {
-      for ( auto i = net.num_gates(); i > 0; i-- )
-      {
-        auto ith_gate_config = ( inv_config >> ( 2 * ( i - 1 ) ) ) & 3ul;
-        tt[i - 1] = bitwise_majority(
-            ith_gate_config == 0ul ? ~tt[net.nodes[i - 1][0]] : tt[net.nodes[i - 1][0]],
-            ith_gate_config == 1ul ? ~tt[net.nodes[i - 1][1]] : tt[net.nodes[i - 1][1]],
-            ith_gate_config == 2ul ? ~tt[net.nodes[i - 1][2]] : tt[net.nodes[i - 1][2]] );
-      }
+      shift += ( net.nodes[i].size() - 1 );
+    }
 
-      if ( func == ( tt[0] & 0xffff ) )
+    const auto n_gates = net.num_gates();
+    std::vector<uint32_t> res( n_gates );
+
+    for ( auto inv_config_itr = 0ul; inv_config_itr < ( 1ul << shift ); inv_config_itr++ )
+    {
+      auto inv_config = inv_config_itr;
+
+      for ( auto i = n_gates; i > 0; i-- )
       {
-        std::vector<uint32_t> res;
-        for ( auto i = 0u; i < net.num_gates(); i++ )
+        const auto& n = net.nodes[i - 1];
+
+        const auto n_fanin = n.size();
+        const auto shift = n_fanin - 1;
+        const auto mask = ( 1 << shift ) - 1;
+        const auto ith_gate_config = ( inv_config & mask );
+
+        res[i - 1] = ith_gate_config;
+
+        // only consider half the inverter configurations, the other half is covered by output inversion
+        if ( n_fanin == 3u )
         {
-          res.push_back( ( inv_config >> ( 2 * i ) ) & 3u );
+          tt[i - 1] = bitwise_majority(
+              ( ith_gate_config & 1 ) ? ~tt[n[0]] : tt[n[0]],
+              ( ith_gate_config & 2 ) ? ~tt[n[1]] : tt[n[1]],
+              tt[n[2]] );
         }
-        return res;
+        else
+        {
+          tt[i - 1] = bitwise_majority(
+              ( ith_gate_config & 1 ) ? ~tt[n[0]] : tt[n[0]],
+              ( ith_gate_config & 2 ) ? ~tt[n[1]] : tt[n[1]],
+              ( ith_gate_config & 4 ) ? ~tt[n[2]] : tt[n[2]],
+              ( ith_gate_config & 8 ) ? ~tt[n[3]] : tt[n[3]],
+              tt[n[4]] );
+        }
+        inv_config >>= shift;
+      }
+      
+      if ( (func & 0xffff) == ( tt[0] & 0xffff ) )
+      {
+        return {false, res};
+      } 
+      if ((~func & 0xffff) == (tt[0] & 0xffff)) {
+        return {true, res};
       }
     }
 
@@ -246,15 +277,7 @@ private:
         input_tt[input_perm[2]],
         input_tt[input_perm[3]] };
 
-    auto output_inv = false;
-
-    if ( func & 1 )
-    {
-      output_inv = true;
-      func = ( ~func ) & 0xffff;
-    }
-
-    auto inverter_config = inverter_config_for_func( input_perm_tt, rep.ntk, func );
+    auto [output_inv, inverter_config] = inverter_config_for_func( input_perm_tt, rep.ntk, func );
 
     std::vector<gate_info> gates{ {}, {}, {}, {}, {} };
     std::vector<uint32_t> depths{ 0u, 0u, 0u, 0u, 0u };
@@ -290,25 +313,12 @@ private:
       for ( auto k = 0u; k < node.size(); k++ )
       {
         auto new_fanin_id = sigmap[node[k]];
-        auto new_fanin_inv = is_kth_fanin_inverted( node.size(), k, type );
+        auto new_fanin_inv = (type & (1u << k)) > 0; 
         gates[sigmap[j]].push_back( ( new_fanin_id << 1 ) | ( new_fanin_inv ? 1u : 0u ) );
       }
     }
 
     return { gates, depths, output_inv };
-  }
-
-  static bool is_kth_fanin_inverted( uint32_t num_fanin, uint32_t fanin_idx, uint32_t type )
-  {
-    if ( num_fanin == 3u )
-    {
-      return type == fanin_idx;
-    }
-    else
-    {
-      assert( false );
-      return false;
-    }
   }
 
   static std::unordered_map<uint64_t, std::map<uint64_t, replacement>> get_default_db()

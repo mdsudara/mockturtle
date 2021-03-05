@@ -32,12 +32,11 @@ void generate_aqfp_dags( const mockturtle::dag_generator_params& params, const s
   std::vector<std::atomic<uint64_t>> counts_inp( 6u );
 
   gen.generate_all_dags( [&]( const auto& net, uint32_t thread_id ) {
-    count++;
     counts_inp[net.input_slots.size()]++;
 
     os[thread_id] << fmt::format( "{}\n", net.encode_as_string() );
 
-    if ( count % 100000 == 0u )
+    if ( (++count) % 100000 == 0u )
     {
       auto t1 = std::chrono::high_resolution_clock::now();
       auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
@@ -83,8 +82,6 @@ void compute_aqfp_dag_costs( const std::unordered_map<uint32_t, double>& gate_co
           {
             if ( temp.length() > 0 )
             {
-              count++;
-
               mockturtle::aqfp_dag<> net( temp );
               auto costs = cc( net );
 
@@ -94,7 +91,7 @@ void compute_aqfp_dag_costs( const std::unordered_map<uint32_t, double>& gate_co
                 os << fmt::format( "{:08x} {}\n", it->first, it->second );
               }
 
-              if ( count % 100000u == 0u )
+              if ( (++count) % 100000u == 0u )
               {
                 auto t1 = std::chrono::high_resolution_clock::now();
                 auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
@@ -142,9 +139,6 @@ void generate_aqfp_db( const std::unordered_map<uint32_t, double>& gate_costs, c
           std::string dag;
           while ( std::getline( ds, dag ) )
           {
-            count++;
-            local_count++;
-
             uint32_t num_configs;
             cs >> num_configs;
 
@@ -168,7 +162,7 @@ void generate_aqfp_db( const std::unordered_map<uint32_t, double>& gate_costs, c
               db.update( ntk, configs );
             }
 
-            if ( count % 10000 == 0u )
+            if ( (++count) % 10000 == 0u )
             {
               auto t1 = std::chrono::high_resolution_clock::now();
               auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
@@ -176,7 +170,7 @@ void generate_aqfp_db( const std::unordered_map<uint32_t, double>& gate_costs, c
               std::cerr << fmt::format( "Number of DAGs processed {:10d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
             }
 
-            if ( local_count % 10000 == 0 )
+            if ( (++local_count) % 10000 == 0u )
             {
               db.remove_redundant();
 
@@ -206,7 +200,7 @@ void generate_aqfp_db( const std::unordered_map<uint32_t, double>& gate_costs, c
   for ( auto i = 0u; i < num_threads; i++ )
   {
     std::ifstream is( fmt::format( "{}_{:02d}.txt", db_file_prefix, i ) );
-    assert( os_tmp.is_open() );
+    assert( is.is_open() );
     db.load_db_from_file( is );
     is.close();
   }

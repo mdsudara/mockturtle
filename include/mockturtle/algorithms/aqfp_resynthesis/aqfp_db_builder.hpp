@@ -170,7 +170,7 @@ public:
 
     /* output the database encoded as an initializer list */
 
-    os << "{ \n";
+    os << "{\n";
     for ( auto i = db.begin(); i != db.end(); i++ )
     {
       os << fmt::format( "\t{{ 0x{:04x}, {{\n", i->first );
@@ -272,16 +272,47 @@ private:
       }
     }
 
-    for ( auto inv_config = 0ul; inv_config < ( 1ul << ( 2 * net.num_gates() ) ); inv_config++ )
+    auto shift = 0u;
+    for ( auto i = 0u; i < net.num_gates(); i++ )
     {
-      for ( auto i = net.num_gates(); i > 0; i-- )
+      shift += ( net.nodes[i].size() - 1 );
+    }
+
+    const auto n_gates = net.num_gates();
+
+    for ( auto inv_config_itr = 0ul; inv_config_itr < ( 1ul << shift ); inv_config_itr++ )
+    {
+      auto inv_config = inv_config_itr;
+
+      for ( auto i = n_gates; i > 0; i-- )
       {
-        auto ith_gate_config = ( inv_config >> ( 2 * ( i - 1 ) ) ) & 3ul;
-        tt[i - 1] = bitwise_majority(
-            ith_gate_config == 0ul ? ~tt[net.nodes[i - 1][0]] : tt[net.nodes[i - 1][0]],
-            ith_gate_config == 1ul ? ~tt[net.nodes[i - 1][1]] : tt[net.nodes[i - 1][1]],
-            ith_gate_config == 2ul ? ~tt[net.nodes[i - 1][2]] : tt[net.nodes[i - 1][2]] );
+        const auto& n = net.nodes[i - 1];
+
+        const auto n_fanin = n.size();
+        const auto shift = n_fanin - 1;
+        const auto mask = ( 1 << shift ) - 1;
+        const auto ith_gate_config = ( inv_config & mask );
+
+        // only consider half the inverter configurations, the other half is covered by output inversion
+        if ( n_fanin == 3u )
+        {
+          tt[i - 1] = bitwise_majority(
+              ( ith_gate_config & 1 ) ? ~tt[n[0]] : tt[n[0]],
+              ( ith_gate_config & 2 ) ? ~tt[n[1]] : tt[n[1]],
+              tt[n[2]] );
+        }
+        else
+        {
+          tt[i - 1] = bitwise_majority(
+              ( ith_gate_config & 1 ) ? ~tt[n[0]] : tt[n[0]],
+              ( ith_gate_config & 2 ) ? ~tt[n[1]] : tt[n[1]],
+              ( ith_gate_config & 4 ) ? ~tt[n[2]] : tt[n[2]],
+              ( ith_gate_config & 8 ) ? ~tt[n[3]] : tt[n[3]],
+              tt[n[4]] );
+        }
+        inv_config >>= shift;
       }
+
       res.insert( tt[0] & 0xffff );
     }
 

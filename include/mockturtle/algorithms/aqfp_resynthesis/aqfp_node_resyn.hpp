@@ -148,7 +148,6 @@ struct aqfp_node_resyn
           const auto fin_id = ( fin >> 1 );
           fanin.push_back( fin_inv ? !sig_map[fin_id] : sig_map[fin_id] );
         }
-
         sig_map[i] = ntk_dest.create_maj( fanin );
         lev_map[i] = 0u;
 
