@@ -1,164 +1,253 @@
 #pragma once
 
+#include <functional>
 #include <iostream>
+#include <mutex>
+#include <thread>
 
 #include <kitty/kitty.hpp>
 
 #include "./dag.hpp"
 #include "./dag_cost.hpp"
 #include "./gen_dag.hpp"
-// #include "./sat.hpp"
-// #include "./simulate_dag.hpp"
 
 namespace mockturtle
 {
 
-/**
- * \brief Generates all DAGs matching the constraints in `params`. If `count_only` is set, only the final DAG count will be printed.
- */
-void generate_all_dags( const mockturtle::dag_generator_params& params, std::ostream& os, bool count_only = false, uint32_t verbose = 0u )
+void generate_aqfp_dags( const mockturtle::dag_generator_params& params, const std::string& file_prefix, uint32_t num_threads )
 {
-  auto gen = mockturtle::dag_generator<int, std::function<double( aqfp_dag_builder<>& )>>( params, []( aqfp_dag_builder<>& net ) { (void) net; return 0.0; } );
-
   auto t0 = std::chrono::high_resolution_clock::now();
-  uint64_t count = 0u;
-  std::vector<uint64_t> counts_inp(6);
-  while ( true )
+
+  std::vector<std::ofstream> os;
+  for ( auto i = 0u; i < num_threads; i++ )
   {
-    auto result_opt = gen.next_dag( []( auto& net ) {(void) net; return true; } );
+    auto file_path = fmt::format( "{}_{:02d}.txt", file_prefix, i );
+    os.emplace_back( file_path );
+    assert( os[i].is_open() );
+  }
 
-    if ( result_opt == std::nullopt )
-    {
-      /* No more DAGs */
-      if ( verbose > 0 )
-      {
-        std::cerr << "Finished generating DAGs" << std::endl;
-      }
-      break;
-    }
-    auto [result, cost] = result_opt.value();
-    (void) cost;
-    if ( !count_only )
-    {
-      os << fmt::format( "{}\n", result.encode_as_string() );
-    }
+  auto gen = mockturtle::dag_generator<int>( params, num_threads );
+
+  std::atomic<uint32_t> count = 0u;
+  std::vector<std::atomic<uint64_t>> counts_inp( 6u );
+
+  gen.generate_all_dags( [&]( const auto& net, uint32_t thread_id ) {
     count++;
-    counts_inp[result.input_slots.size()] ++;
+    counts_inp[net.input_slots.size()]++;
 
-    if ( verbose > 5u || ( verbose > 0 && count % 1000 == 0 ) )
+    os[thread_id] << fmt::format( "{}\n", net.encode_as_string() );
+
+    if ( count % 100000 == 0u )
     {
       auto t1 = std::chrono::high_resolution_clock::now();
       auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
-      std::cerr << fmt::format( "Number of DAGs generated {:8d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
+
+      std::cerr << fmt::format( "Number of DAGs generated {:10d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
     }
+  } );
+
+  for ( auto& file : os )
+  {
+    file.close();
   }
+
   auto t2 = std::chrono::high_resolution_clock::now();
   auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>( t2 - t0 );
   std::cerr << fmt::format( "Number of DAGs generated {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
-  std::cerr << fmt::format( "Number of DAGs of different input counts: [{}]\n", fmt::join(counts_inp, " "));
+
+  std::cerr << fmt::format( "Number of DAGs of different input counts: [3 -> {},  4 -> {}, 5 -> {}]\n", counts_inp[3u], counts_inp[4u], counts_inp[5u] );
 }
 
-/**
- * \brief Compute costs for DAG considering multiple input level configurations.
- */
-template<typename CostComputerT>
-void cost_all_dags( std::istream& is, std::ostream& os, CostComputerT&& cc, uint32_t verbose = 0u )
+void compute_aqfp_dag_costs( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters,
+                             const std::string& dag_file_prefix, const std::string& cost_file_prefix, uint32_t num_threads )
 {
-  std::string temp;
-  uint32_t count = 0u;
+  auto t0 = std::chrono::high_resolution_clock::now();
 
-  while ( getline( is, temp ) )
+  std::vector<std::thread> threads;
+
+  std::atomic<uint64_t> count = 0u;
+
+  for ( auto i = 0u; i < num_threads; i++ )
   {
-    if ( temp.length() > 0 )
-    {
-      if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000u == 0u ) )
-      {
-        std::cerr << fmt::format( "Processing dag {} [{}]\n", ++count, temp );
-      }
+    threads.emplace_back(
+        [&]( auto id ) {
+          std::ifstream is( fmt::format( "{}_{:02d}.txt", dag_file_prefix, id ) );
+          assert( is.is_open() );
 
-      mockturtle::aqfp_dag<> net(temp);
+          std::ofstream os( fmt::format( "{}_{:02d}.txt", cost_file_prefix, id ) );
+          assert( os.is_open() );
+          mockturtle::dag_aqfp_cost_all_configs<mockturtle::aqfp_dag<>> cc( gate_costs, splitters );
 
-      auto costs = cc( net );
+          std::string temp;
+          while ( getline( is, temp ) )
+          {
+            if ( temp.length() > 0 )
+            {
+              count++;
 
-      os << "begin" << std::endl;
-      for ( auto it = costs.begin(); it != costs.end(); it++ )
-      {
-        os << fmt::format( "{:08x} {}\n", it->first, it->second );
-      }
-      os << "end" << std::endl;
-    }
+              mockturtle::aqfp_dag<> net( temp );
+              auto costs = cc( net );
+
+              os << costs.size() << std::endl;
+              for ( auto it = costs.begin(); it != costs.end(); it++ )
+              {
+                os << fmt::format( "{:08x} {}\n", it->first, it->second );
+              }
+
+              if ( count % 100000u == 0u )
+              {
+                auto t1 = std::chrono::high_resolution_clock::now();
+                auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
+
+                std::cerr << fmt::format( "Number of DAGs processed {:10d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
+              }
+            }
+          }
+
+          is.close();
+          os.close();
+        },
+        i );
   }
+
+  for ( auto& t : threads )
+  {
+    t.join();
+  }
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>( t2 - t0 );
+  std::cerr << fmt::format( "Number of DAGs processed {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
 }
 
-// /**
-//  * \brief Simulates DAGs read from a file.
-//  * ! Only for 4-input networks or 5-input ones with designated constant node !
-//  * Reads DAG structures from the "input_stream", compute the set of
-//  * npn-classes synthesizable using each DAG, and writes computed output
-//  * as binary flags to "output_stream".
-//  */
-// void simulate_all_dags( std::istream& is, std::ostream& os, uint32_t verbose = 0u )
-// {
-//   std::vector<uint32_t> tt_to_id;
-//   std::vector<uint64_t> id_to_npn;
+void generate_aqfp_db( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters,
+                       const std::string& dag_file_prefix, const std::string& cost_file_prefix, const std::string& db_file_prefix, uint32_t num_threads )
+{
+  auto t0 = std::chrono::high_resolution_clock::now();
 
-//   if ( verbose > 0 )
-//   {
-//     std::cerr << fmt::format( "find map from truthtable to npn id...\n" );
-//   }
-//   detail::compute_tt_to_npn_class_mapping( 4u, tt_to_id, id_to_npn );
-//   if ( verbose > 0 )
-//   {
-//     std::cerr << fmt::format( "found map from truthtable to npn id...\n" );
-//   }
+  std::vector<std::thread> threads;
 
-//   std::vector<uint64_t> input_tt = {
-//       0x0000UL,
-//       0xaaaaUL,
-//       0xccccUL,
-//       0xf0f0UL,
-//       0xff00UL,
-//   };
+  std::atomic<uint64_t> count = 0u;
 
-//   dag_simulator<uint64_t> dag_sim( input_tt );
+  for ( auto i = 0u; i < num_threads; i++ )
+  {
+    threads.emplace_back(
+        [&]( auto id ) {
+          std::ifstream ds( fmt::format( "{}_{:02d}.txt", dag_file_prefix, id ) );
+          std::ifstream cs( fmt::format( "{}_{:02d}.txt", cost_file_prefix, id ) );
 
-//   std::string temp;
-//   uint32_t count = 0u;
-//   while ( getline( is, temp ) )
-//   {
-//     if ( temp.length() > 0 )
-//     {
-//       if ( verbose > 5u || ( verbose > 0 && ( ++count ) % 1000 == 0 ) )
-//       {
-//         std::cerr << fmt::format( "processing dag {} [{}]\n", count, temp );
-//       }
+          mockturtle::aqfp_db_builder<> db( gate_costs, splitters );
+          uint64_t local_count = 0u;
 
-//       mockturtle::aqfp_logical_network_t<int> net;
-//       net.decode_dag( temp );
+          std::string dag;
+          while ( std::getline( ds, dag ) )
+          {
+            count++;
+            local_count++;
 
-//       if ( net.zero_input == 0 && net.input_slots.size() > 4u )
-//       {
-//         continue;
-//       }
+            uint32_t num_configs;
+            cs >> num_configs;
 
-//       uint64_t npn_flags[4] = { 0ul, 0ul, 0ul, 0ul };
-//       auto funcs = dag_sim.all_functions_from_dag( net );
-//       for ( auto f : funcs )
-//       {
-//         auto id = tt_to_id[f];
-//         npn_flags[id / 64ul] |= ( 1ul << ( id % 64ul ) );
-//       }
+            std::unordered_map<uint64_t, double> configs;
 
-//       os << fmt::format( "{:16x} {:16x} {:16x} {:16x}\n", npn_flags[0], npn_flags[1], npn_flags[2], npn_flags[3] );
-//     }
-//   }
-// }
+            std::string config_str;
+            uint64_t config;
+            double cost;
 
-// template<typename Ntk, typename TruthTableT>
-// bool is_synthesizable( const Ntk& ntk, const int32_t num_inputs, const TruthTableT& tt, uint32_t verbose )
-// {
-//   sat_encoder se( ntk, num_inputs, tt, verbose );
-//   return se.solve();
-// }
+            for ( auto j = 0u; j < num_configs; j++ )
+            {
+              cs >> config_str;
+              cs >> cost;
+              config = std::stoul( config_str, 0, 16 );
+              configs[config] = cost;
+            }
+
+            mockturtle::aqfp_dag<> ntk( dag );
+            if ( ntk.input_slots.size() < 5u || ( ntk.input_slots.size() == 5u && ntk.zero_input != 0 ) )
+            {
+              db.update( ntk, configs );
+            }
+
+            if ( count % 10000 == 0u )
+            {
+              auto t1 = std::chrono::high_resolution_clock::now();
+              auto d1 = std::chrono::duration_cast<std::chrono::milliseconds>( t1 - t0 );
+
+              std::cerr << fmt::format( "Number of DAGs processed {:10d}\nTime so far in seconds {:9.3f}\n", count, d1.count() / 1000.0 );
+            }
+
+            if ( local_count % 10000 == 0 )
+            {
+              db.remove_redundant();
+
+              std::ofstream os_tmp( fmt::format( "{}_{:02d}.txt", db_file_prefix, id ) );
+              assert( os_tmp.is_open() );
+              db.save_db_to_file( os_tmp );
+              os_tmp.close();
+            }
+          }
+
+          db.remove_redundant();
+
+          std::ofstream os( fmt::format( "{}_{:02d}.txt", db_file_prefix, id ) );
+          assert( os.is_open() );
+          db.save_db_to_file( os );
+          os.close();
+        },
+        i );
+  }
+
+  for ( auto& t : threads )
+  {
+    t.join();
+  }
+
+  mockturtle::aqfp_db_builder<> db( gate_costs, splitters );
+  for ( auto i = 0u; i < num_threads; i++ )
+  {
+    std::ifstream is( fmt::format( "{}_{:02d}.txt", db_file_prefix, i ) );
+    assert( os_tmp.is_open() );
+    db.load_db_from_file( is );
+    is.close();
+  }
+
+  db.remove_redundant();
+
+  std::ofstream os_final( fmt::format( "{}.txt", db_file_prefix ) );
+  assert( os_final.is_open() );
+  db.save_db_to_file( os_final );
+  os_final.close();
+
+  std::ofstream os_final_init_list( fmt::format( "{}_as_initializer_list.txt", db_file_prefix ) );
+  assert( os_final_init_list.is_open() );
+  db.save_db_to_file( os_final_init_list, true );
+  os_final_init_list.close();
+
+  auto t2 = std::chrono::high_resolution_clock::now();
+  auto d2 = std::chrono::duration_cast<std::chrono::milliseconds>( t2 - t0 );
+  std::cerr << fmt::format( "Number of DAGs processed {:10d}\nTime elapsed in seconds {:9.3f}\n", count, d2.count() / 1000.0 );
+}
+
+void generate_aqfp_db(
+    const mockturtle::dag_generator_params& params,
+    const std::unordered_map<uint32_t, double>& gate_costs,
+    const std::unordered_map<uint32_t, double>& splitters,
+    const std::string& file_prefix,
+    uint32_t num_threads )
+{
+  std::cerr << "Generating DAGs ...\n";
+  auto dag_file_prefix = fmt::format( "{}_dags", file_prefix );
+  generate_aqfp_dags( params, dag_file_prefix, num_threads );
+
+  std::cerr << "Computing costs ...\n";
+  auto cost_file_prefix = fmt::format( "{}_costs", file_prefix );
+  compute_aqfp_dag_costs( gate_costs, splitters, dag_file_prefix, cost_file_prefix, num_threads );
+
+  std::cerr << "Generating the database ...\n";
+  auto db_file_prefix = fmt::format( "{}_db", file_prefix );
+  generate_aqfp_db( gate_costs, splitters, dag_file_prefix, cost_file_prefix, db_file_prefix, num_threads );
+
+  std::cerr << "Generation completed!";
+}
 
 } // namespace mockturtle

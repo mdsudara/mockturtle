@@ -49,7 +49,7 @@ public:
       : simp_cc( gate_costs ), fanout_cc( splitters ) {}
 
   /*! \brief Compute cost assuming all primary inputs are at the same depth. */
-  double operator()( Ntk& orig_net )
+  double operator()( const Ntk& orig_net )
   {
     net = orig_net;
     fanout = std::vector<std::vector<typename Ntk::node_type>>( net.nodes.size() );
@@ -251,7 +251,7 @@ public:
   dag_aqfp_cost_and_depths( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
       : dag_aqfp_cost<Ntk>( gate_costs, splitters ) {}
 
-  std::pair<double, std::vector<uint32_t>> operator()( Ntk& orig_net, const std::vector<uint32_t>& input_depths )
+  std::pair<double, std::vector<uint32_t>> operator()(const Ntk& orig_net, const std::vector<uint32_t>& input_depths )
   {
     net = orig_net;
     fanout = std::vector<std::vector<typename Ntk::node_type>>( net.nodes.size() );
@@ -389,7 +389,7 @@ public:
   dag_aqfp_cost_all_configs( const std::unordered_map<uint32_t, double>& gate_costs, const std::unordered_map<uint32_t, double>& splitters )
       : dag_aqfp_cost<Ntk>( gate_costs, splitters ) {}
 
-  std::unordered_map<depth_config_t, double> operator()( Ntk& orig_net )
+  std::unordered_map<depth_config_t, double> operator()(const Ntk& orig_net )
   {
     std::unordered_map<depth_config_t, double> config_cost;
     net = orig_net;

@@ -208,6 +208,7 @@ int main( int argc, char** argv )
   builder.load_db_from_file( db_file );
   db_file.close();
 
+  // mockturtle::aqfp_db<> db( gate_costs, splitters );
   auto db = builder.build();
 
   experiment_aqfp_exact_syn( gate_costs, splitters, db, mcnc );

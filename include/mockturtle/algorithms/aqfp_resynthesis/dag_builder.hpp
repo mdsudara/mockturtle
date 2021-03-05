@@ -44,7 +44,7 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
       : aqfp_dag<node_type>( nodes, input_slots, zero_input ),
         is_partial_dag( is_partial_dag ),
         num_levels( num_levels ),
-        num_gates_of_fanin( num_gates_of_fanin),
+        num_gates_of_fanin( num_gates_of_fanin ),
         node_num_fanin( node_num_fanin ),
         last_layer_leaves( last_layer_leaves ),
         other_leaves( other_leaves ) {}
@@ -183,7 +183,7 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
   }
 
   /*! \brief Make a copy  with empty other_leaves. */
-  aqfp_dag_builder copy_with_last_layer_leaves()
+  aqfp_dag_builder copy_with_last_layer_leaves() const
   {
     aqfp_dag_builder res{
         nodes,
@@ -216,28 +216,5 @@ struct aqfp_dag_builder : public aqfp_dag<NodeT>
     return net;
   }
 };
-
-/*! \brief Returns a readable string representation of the aqfp_dag_builder state. */
-template<typename NodeT>
-std::string as_string( const aqfp_dag_builder<NodeT>& net )
-{
-  std::vector<std::string> nodes;
-  for ( auto i = 0u; i < net.nodes.size(); i++ )
-  {
-    std::vector<int> temp = net.nodes[i];
-    while ( temp.size() < net.node_num_fanin[i] )
-    {
-      temp.push_back( i );
-    }
-    nodes.push_back( fmt::format( "{} = ({})", i, fmt::join( temp, " " ) ) );
-  }
-  return fmt::format( "{} N = {} DAG [ {} ] I = [{}] LL = [{}] OL = [{}] Z = {}", ( net.is_partial_dag ? "PDAG" : "DAG" ),
-                      net.num_gates(),
-                      fmt::join( nodes, " " ),
-                      fmt::join( net.input_slots, " " ),
-                      fmt::join( net.last_layer_leaves, " " ),
-                      fmt::join( net.other_leaves, " " ),
-                      ( net.zero_input > 0 ) ? fmt::format( "{}", net.zero_input ) : "NA" );
-}
 
 } // namespace mockturtle
